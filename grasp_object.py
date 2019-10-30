@@ -50,7 +50,8 @@ def gripper_forces(command=None, grip_force=3.0):
     return u_gripper
 
 
-def _get_approach(target_pos, approach_buffer=0.03, z_offset=0):
+def _get_approach(
+        target_pos, approach_buffer=0.03, z_offset=0, z_rot=None, rot_wrist=False):
     """
     Takes the target location, and returns an
     orientation to approach the target, along with a target position that
@@ -71,7 +72,25 @@ def _get_approach(target_pos, approach_buffer=0.03, z_offset=0):
     z_offset: float, Optional (Default: 0.2)
         sometimes it is desirable to approach a target from above or below.
         This gets added to the final target position
+    z_rot: float, optional (Default: pi/2)
+        rotates the z axis for the final approach
+        pi/2 to be parallel with ground (gripper pointing outwards)
+        pi to be perpendicular (gripper pointing down)
+    rot_wrist: boolean, optional (Default: False)
+        True to rotate the gripper an additional pi/2 rad along the wrist
+        rotation axis
     """
+    if z_rot is None:
+        theta1 = np.pi/2
+    else:
+        theta1 = z_rot
+
+    theta2_scale = 1
+    if rot_wrist:
+        # rotates twice so our gripper grasping orientation is shifted by pi/2
+        # along the wrist rotation axis
+        theta2_scale = 2
+
     # save a copy of the target in case weird pointer things happen with lists
     # target_z = np.copy(target_pos[2])
     target_pos = np.asarray(target_pos)
@@ -90,14 +109,13 @@ def _get_approach(target_pos, approach_buffer=0.03, z_offset=0):
     #approach_vector[2] = 0
 
     # world z pointing up, rotate by pi/2 to be parallel with ground
-    theta1 = np.pi/2
     q1 = [np.cos(theta1/2),
         0,
         np.sin(theta1/2),
         0
         ]
     # now we rotate about z to get x pointing up
-    theta2 = np.arctan2(target_pos[1], target_pos[0])
+    theta2 = theta2_scale * np.arctan2(target_pos[1], target_pos[0])
     # print('theta2: ', theta2)
     q2 = [np.cos(theta2/2),
         0,
@@ -116,7 +134,8 @@ def _get_approach(target_pos, approach_buffer=0.03, z_offset=0):
 
 def get_approach_path(
         robot_config, path_planner, q, target_pos, max_reach_dist=None,
-        min_z=0, target_orientation=None, start_pos=None, **kwargs):
+        min_z=0, target_orientation=None, start_pos=None, z_rot=None,
+        rot_wrist=False, **kwargs):
     """
     Accepts a robot config, path planner, and target_position, returns the
     generated position and orientation paths to approach the target for grasping
@@ -144,6 +163,13 @@ def get_approach_path(
         (see _get_approach() )
     start_pos: list of three floats, Optional (Default: None)
         if left as None will use the current EE position
+    z_rot: float, optional (Default: pi/2)
+        rotates the z axis for the final approach
+        pi/2 to be parallel with ground (gripper pointing outwards)
+        pi to be perpendicular (gripper pointing down)
+    rot_wrist: boolean, optional (Default: False)
+        True to rotate the gripper an additional pi/2 rad along the wrist
+        rotation axis
     """
 
     if target_pos[2] < min_z:
@@ -163,7 +189,7 @@ def get_approach_path(
 
     # calculate our target approach position and orientation
     approach_pos, approach_orient = _get_approach(
-        target_pos=target_pos, **kwargs)
+        target_pos=target_pos, z_rot=z_rot, rot_wrist=rot_wrist, **kwargs)
 
     if target_orientation is not None:
         print('Using manual target orientation')
@@ -279,7 +305,7 @@ ee_track = []
 ee_angles_track = []
 target_track = []
 target_angles_track = []
-object_xyz = np.array([0, 0.5, 0.3])
+object_xyz = np.array([0, -0.5, 0.1])
 deposit_xyz = np.array([0.4, 0.5, 0.0])
 
 
@@ -297,7 +323,9 @@ try:
         'z_offset': 0.2,
         'approach_buffer': 0.02,
         'ctrlr': osc6dof,
-        'traj_planner': second_order_path_planner
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': True
         },
         # get into grasping position
         {'type': 'grasp',
@@ -310,7 +338,9 @@ try:
         'z_offset': 0,
         'approach_buffer': 0,
         'ctrlr': osc6dof,
-        'traj_planner': second_order_path_planner
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': True
         },
         # grasp object
         {'type': 'grasp',
@@ -323,7 +353,9 @@ try:
         'z_offset': 0,
         'approach_buffer': 0,
         'ctrlr': osc6dof,
-        'traj_planner': second_order_path_planner
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': True
         },
         # lift object
         {'type': 'grasp',
@@ -336,7 +368,9 @@ try:
         'z_offset': 0.2,
         'approach_buffer': 0.03,
         'ctrlr': osc6dof,
-        'traj_planner': second_order_path_planner
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': True
         },
 
         # MOVE TO TARGET AND DROP OFF
@@ -363,7 +397,9 @@ try:
         'ctrlr': osc3dof,
         'z_offset': 0.35,
         'approach_buffer': 0,
-        'traj_planner': second_order_path_planner
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi/2,
+        'rot_wrist': False
         },
         # drop off object
         # {'type': 'target_reach',
@@ -393,6 +429,7 @@ try:
 
 
     print('\nSimulation starting...\n')
+    interface.viewer._paused = True
 
     final_xyz = deposit_xyz
 
@@ -424,7 +461,9 @@ try:
             max_reach_dist=None,
             min_z=0.0,
             approach_buffer=reach['approach_buffer'],
-            z_offset=reach['z_offset'])
+            z_offset=reach['z_offset'],
+            z_rot=reach['z_rot'],
+            rot_wrist=reach['rot_wrist'])
 
 
         if reach['type'] == 'target_reach':
