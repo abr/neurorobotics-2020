@@ -10,12 +10,17 @@ After termination the script will plot results
 import numpy as np
 import glfw
 import time
+import sys
 
 from abr_control.controllers import OSC, Damping, path_planners
 from abr_control.arms.mujoco_config import MujocoConfig as arm
 from abr_control.interfaces.mujoco import Mujoco
 from abr_control.utils import transformations
 
+plot = False
+pause = False
+if len(sys.argv) > 1:
+    pause = eval(sys.argv[1])
 
 # initialize our robot config
 robot_config = arm('jaco2_gripper')
@@ -29,26 +34,6 @@ interface.connect()
 
 feedback = interface.get_feedback()
 hand_xyz = robot_config.Tx('EE', feedback['q'])
-
-def gripper_forces(command=None, grip_force=3.0):
-    """
-    accepts open or close and returns a gripper force in the corresponding direction
-
-    Parameters
-    ----------
-    command: string
-        open to open gripper, close to close it
-    grip_force: float, optional (Default: 3.0)
-        the gripper force in Nm
-    """
-    if command == 'open':
-        u_gripper = np.ones(3) * grip_force
-    elif command == 'close':
-        u_gripper = np.ones(3) * -grip_force
-    elif command is None:
-        u_gripper = np.zeros(3)
-    return u_gripper
-
 
 def _get_approach(
         target_pos, approach_buffer=0.03, z_offset=0, z_rot=None, rot_wrist=False):
@@ -305,9 +290,12 @@ ee_track = []
 ee_angles_track = []
 target_track = []
 target_angles_track = []
-object_xyz = np.array([0, -0.5, 0.1])
+object_xyz = np.array([0.5, 0.0, 0.03])
 deposit_xyz = np.array([0.4, 0.5, 0.0])
 
+rot_wrist = True
+open_force = 3
+close_force = -5
 
 try:
     reaching_list = [
@@ -318,14 +306,14 @@ try:
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 1000,
-        'grasp_command': 'open',
+        'grasp_force': open_force,
         'hold_timesteps': None,
         'z_offset': 0.2,
         'approach_buffer': 0.02,
         'ctrlr': osc6dof,
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': True
+        'rot_wrist': rot_wrist
         },
         # get into grasping position
         {'type': 'grasp',
@@ -333,14 +321,14 @@ try:
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 300,
-        'grasp_command': 'open',
+        'grasp_force': open_force,
         'hold_timesteps': None,
-        'z_offset': 0,
-        'approach_buffer': 0,
+        'z_offset': 0.055,
+        'approach_buffer': -0.02,
         'ctrlr': osc6dof,
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': True
+        'rot_wrist': rot_wrist
         },
         # grasp object
         {'type': 'grasp',
@@ -348,14 +336,14 @@ try:
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 500,
-        'grasp_command': 'close',
+        'grasp_force': close_force,
         'hold_timesteps': 500,
-        'z_offset': 0,
+        'z_offset': 0.055,
         'approach_buffer': 0,
         'ctrlr': osc6dof,
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': True
+        'rot_wrist': rot_wrist
         },
         # lift object
         {'type': 'grasp',
@@ -363,14 +351,14 @@ try:
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 300,
-        'grasp_command': 'close',
+        'grasp_force': close_force,
         'hold_timesteps': None,
         'z_offset': 0.2,
         'approach_buffer': 0.03,
         'ctrlr': osc6dof,
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': True
+        'rot_wrist': rot_wrist
         },
 
         # MOVE TO TARGET AND DROP OFF
@@ -380,7 +368,7 @@ try:
         # 'start_pos': None,
         # 'orientation': None,
         # 'n_timesteps': 1000,
-        # 'grasp_command': 'close',
+        # 'grasp_force': close_force,
         # 'hold_timesteps': None,
         # 'z_offset': 0.5,
         # 'approach_buffer': 0.0,
@@ -392,7 +380,7 @@ try:
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 100,
-        'grasp_command': 'close',
+        'grasp_force': close_force,
         'hold_timesteps': None,
         'ctrlr': osc3dof,
         'z_offset': 0.35,
@@ -407,7 +395,7 @@ try:
         # 'start_pos': None,
         # 'orientation': None,
         # 'n_timesteps': 1000,
-        # 'grasp_command': 'open',
+        # 'grasp_force': open_force,
         # 'hold_timesteps': 500,
         # 'z_offset': 0.31,
         # 'approach_buffer': 0,
@@ -419,7 +407,7 @@ try:
         # 'start_pos': None,
         # 'orientation': None,
         # 'n_timesteps': 1000,
-        # 'grasp_command': None,
+        # 'grasp_force': open_force,
         # 'hold_timesteps': None,
         # 'z_offset': 0.65,
         # 'approach_buffer': 0.0,
@@ -429,7 +417,7 @@ try:
 
 
     print('\nSimulation starting...\n')
-    interface.viewer._paused = True
+    interface.viewer._paused = pause
 
     final_xyz = deposit_xyz
 
@@ -529,7 +517,7 @@ try:
                 )
 
             # get our gripper command
-            u_gripper = gripper_forces(reach['grasp_command'], grip_force=3)
+            u_gripper = np.ones(3) * reach['grasp_force']
 
             # stack our control signals and send to mujoco, stepping the sim forward
             u = np.hstack((u, u_gripper))
@@ -576,7 +564,7 @@ finally:
     target_track = np.array(target_track).T
     target_angles_track = np.array(target_angles_track).T
 
-    if ee_track.shape[0] > 0:
+    if ee_track.shape[0] > 0 and plot==True:
         # plot distance from target and 3D trajectory
         import matplotlib.pyplot as plt
         from mpl_toolkits.mplot3d import axes3d  # pylint: disable=W0611
