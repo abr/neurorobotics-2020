@@ -29,6 +29,8 @@ robot_config = arm('jaco2_gripper')
 # create our interface
 interface = Mujoco(robot_config, dt=.001)
 interface.connect()
+joint_offset = np.array([0, 0, 0, 0, 0, 0])
+interface.send_target_angles((robot_config.START_ANGLES+joint_offset))
 
 feedback = interface.get_feedback()
 hand_xyz = robot_config.Tx('EE', feedback['q'])
@@ -38,8 +40,8 @@ ee_track = []
 ee_angles_track = []
 target_track = []
 target_angles_track = []
-object_xyz = np.array([0.5, 0.0, 0.03])
-deposit_xyz = np.array([0.4, 0.5, 0.0])
+object_xyz = np.array([-0.5, 0.0, 0.0])
+deposit_xyz = np.array([0.4, 0.5, 0.2])
 
 rot_wrist = True
 open_force = 3
@@ -128,10 +130,10 @@ try:
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 100,
-        'grasp_force': close_force,
+        'grasp_force': close_force*2,
         'hold_timesteps': None,
         'ctrlr': osc3dof(robot_config),
-        'z_offset': 0.35,
+        'z_offset': 0,
         'approach_buffer': 0,
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi/2,
@@ -235,9 +237,8 @@ try:
                     (hand_xyz - (final_xyz + np.array([0, 0, reach['z_offset']]))))
                 if not np.allclose(final_xyz, old_final_xyz, atol=1e-5):
                     traj_planner.reset(
-                        position=hand_xyz,
+                        position=pos,
                         target_pos=(final_xyz + np.array([0, 0, reach['z_offset']])))
-                    print('RESETTING DMP')
                 pos, vel = traj_planner._step(error=error)
 
             else:
@@ -251,10 +252,10 @@ try:
 
             # set our path planner visualization and final drop off location
             interface.set_mocap_xyz('target', final_xyz)
-            interface.set_mocap_xyz('path_planner_orientation', target[:3])
-            interface.set_mocap_orientation('path_planner_orientation',
-                transformations.quaternion_from_euler(
-                    orient[0], orient[1], orient[2], 'rxyz'))
+            # interface.set_mocap_xyz('path_planner_orientation', target[:3])
+            # interface.set_mocap_orientation('path_planner_orientation',
+            #     transformations.quaternion_from_euler(
+            #         orient[0], orient[1], orient[2], 'rxyz'))
 
             # calculate our osc control signal
             u = reach['ctrlr'].generate(
