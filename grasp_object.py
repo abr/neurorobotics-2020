@@ -269,7 +269,7 @@ try:
 
             # stack our control signals and send to mujoco, stepping the sim forward
             u = np.hstack((u, u_gripper))
-            interface.send_forces(u)
+            interface.send_forces(u, update_display=True if count % 2 == 0 else False)
 
             # calculate our 2norm error
             if count % 500 == 0:
