@@ -48,7 +48,7 @@ open_force = 3
 close_force = -5
 
 try:
-    reaching_list = [
+    pick_up = [
         # GRASP AND LIFT
         # move above object
         {'type': 'grasp',
@@ -109,22 +109,9 @@ try:
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist
-        },
+        }]
 
-        # MOVE TO TARGET AND DROP OFF
-        # move above drop off
-        # {'type': 'target_reach',
-        # 'target_pos': deposit_xyz,
-        # 'start_pos': None,
-        # 'orientation': None,
-        # 'n_timesteps': 1000,
-        # 'grasp_force': close_force,
-        # 'hold_timesteps': None,
-        # 'z_offset': 0.5,
-        # 'approach_buffer': 0.0,
-        # 'traj_planner': second_order_path_planner
-        # },
-        # move to drop off
+    reach_target = [
         {'type': 'target_reach',
         'target_pos': deposit_xyz,
         'start_pos': None,
@@ -138,169 +125,224 @@ try:
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi/2,
         'rot_wrist': False
+        }]
+
+    drop_off = [
+        # go above drop off
+        {'type': 'grasp',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': None,
+        'n_timesteps': 1000,
+        'grasp_force': close_force*2,
+        'hold_timesteps': None,
+        'z_offset': 0.2,
+        'approach_buffer': 0.03,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
         },
-        # drop off object
-        # {'type': 'target_reach',
-        # 'target_pos': deposit_xyz,
-        # 'start_pos': None,
-        # 'orientation': None,
-        # 'n_timesteps': 1000,
-        # 'grasp_force': open_force,
-        # 'hold_timesteps': 500,
-        # 'z_offset': 0.31,
-        # 'approach_buffer': 0,
-        # 'traj_planner': second_order_path_planner
-        # },
-        # lift clear of object in z
-        # {'type': 'target_reach',
-        # 'target_pos': deposit_xyz,
-        # 'start_pos': None,
-        # 'orientation': None,
-        # 'n_timesteps': 1000,
-        # 'grasp_force': open_force,
-        # 'hold_timesteps': None,
-        # 'z_offset': 0.65,
-        # 'approach_buffer': 0.0,
-        # 'traj_planner': second_order_path_planner
-        # }
+        # go to drop off
+        {'type': 'grasp',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': None,
+        'n_timesteps': 300,
+        'grasp_force': close_force*2,
+        'hold_timesteps': None,
+        'z_offset': 0.01,
+        'approach_buffer': 0.0,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
+        },
+        # release
+        {'type': 'grasp',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': None,
+        'n_timesteps': 500,
+        'grasp_force': open_force,
+        'hold_timesteps': 500,
+        'z_offset': 0.01,
+        'approach_buffer': 0.0,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
+        },
+
+        # move above object
+        {'type': 'grasp',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': None,
+        'n_timesteps': 1000,
+        'grasp_force': open_force,
+        'hold_timesteps': None,
+        'z_offset': 0.2,
+        'approach_buffer': 0.02,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
+        },
         ]
 
 
+    def get_reach_mode():
+        reach_mode =  interface.viewer.reach_mode
+        if reach_mode == 'reach_target':
+            reach_list = reach_target
+        elif reach_mode == 'pick_up':
+            reach_list = pick_up
+        elif reach_mode == 'drop_off':
+            reach_list = drop_off
+
+        return reach_list, reach_mode
+
     print('\nSimulation starting...\n')
     interface.viewer._paused = pause
-
     final_xyz = deposit_xyz
 
-    # this can later be expaned to actually check the user input to start reaching
-    # for object to grasp, or for different objects, for now just set it to True
-    interface.viewer.pick_up_object = True
+    while 1:
+        reach_list, reach_mode = get_reach_mode()
+        print('MAIN MODE: ', reach_mode)
 
-    # wait until the user hits the 'pick up object' button
-    while not interface.viewer.pick_up_object:
-        time.sleep(0.5)
-
-    for reach in reaching_list:
-        count = 0
-        hand_xyz = robot_config.Tx('EE', feedback['q'])
-
-        if reach['type'] == 'target_reach':
-            reach['target_pos'] = final_xyz
-
-        print('Next reach')
-        # calculate our position and orientation path planners, with their
-        # corresponding approach
-        traj_planner, orientation_planner, target_data = get_approach_path(
-            robot_config=robot_config,
-            path_planner=reach['traj_planner'](reach['n_timesteps']),
-            q=feedback['q'],
-            target_pos=reach['target_pos'],
-            target_orientation=reach['orientation'],
-            start_pos=reach['start_pos'],
-            max_reach_dist=None,
-            min_z=0.0,
-            approach_buffer=reach['approach_buffer'],
-            z_offset=reach['z_offset'],
-            z_rot=reach['z_rot'],
-            rot_wrist=reach['rot_wrist'])
-
-
-        if reach['type'] == 'target_reach':
-            traj_planner.reset(
-                position=hand_xyz,
-                target_pos=(final_xyz + np.array([0, 0, reach['z_offset']])))
-
-        at_target = False
-        count = 0
-        while not at_target:
-            # check for our exit command (caps lock)
-            if interface.viewer.exit:
-                glfw.destroy_window(interface.viewer.window)
-                break
-
-            # get our user shifted drop off location
-            old_final_xyz = final_xyz
-            final_xyz = target_shift(
-                interface=interface,
-                base_location=final_xyz,
-                scale=0.05,
-                xlim=[-0.5, 0.5],
-                ylim=[-0.5, 0.5],
-                zlim=[0.0, 0.7])
-
-            # get arm feedback
-            feedback = interface.get_feedback()
+        for reach in reach_list:
+            print('LOOP MODE: ', reach_mode)
+            count = 0
             hand_xyz = robot_config.Tx('EE', feedback['q'])
 
-            # update our path planner position and orientation
             if reach['type'] == 'target_reach':
-                error = np.linalg.norm(
-                    (hand_xyz - (final_xyz + np.array([0, 0, reach['z_offset']]))))
-                if not np.allclose(final_xyz, old_final_xyz, atol=1e-5):
-                    traj_planner.reset(
-                        position=pos,
-                        target_pos=(final_xyz + np.array([0, 0, reach['z_offset']])))
-                pos, vel = traj_planner._step(error=error)
+                reach['target_pos'] = final_xyz
 
-            else:
-                error = np.linalg.norm((hand_xyz-target_data['approach_pos']))
-                pos, vel = traj_planner.next()
-
-            #TODO will need to update the orientation planner somehow, not using
-            # dmps so can't use reset, may need to regen and change n_timesteps?
-            orient = orientation_planner.next()
-            target = np.hstack([pos, orient])
-
-            # set our path planner visualization and final drop off location
-            interface.set_mocap_xyz('target', final_xyz)
-            # interface.set_mocap_xyz('path_planner_orientation', target[:3])
-            # interface.set_mocap_orientation('path_planner_orientation',
-            #     transformations.quaternion_from_euler(
-            #         orient[0], orient[1], orient[2], 'rxyz'))
-
-            # calculate our osc control signal
-            u = reach['ctrlr'].generate(
+            print('Next reach')
+            # calculate our position and orientation path planners, with their
+            # corresponding approach
+            traj_planner, orientation_planner, target_data = get_approach_path(
+                robot_config=robot_config,
+                path_planner=reach['traj_planner'](reach['n_timesteps']),
                 q=feedback['q'],
-                dq=feedback['dq'],
-                target=target,
-                #target_vel=np.hstack([vel, np.zeros(3)])
-                )
+                target_pos=reach['target_pos'],
+                target_orientation=reach['orientation'],
+                start_pos=reach['start_pos'],
+                max_reach_dist=None,
+                min_z=0.0,
+                approach_buffer=reach['approach_buffer'],
+                z_offset=reach['z_offset'],
+                z_rot=reach['z_rot'],
+                rot_wrist=reach['rot_wrist'])
 
-            # get our gripper command
-            u_gripper = np.ones(3) * reach['grasp_force']
 
-            # stack our control signals and send to mujoco, stepping the sim forward
-            u = np.hstack((u, u_gripper))
-            interface.send_forces(u, update_display=True if count % 2 == 0 else False)
-
-            # calculate our 2norm error
-            if count % 500 == 0:
-                print('error: ', error)
-
-            # track data
-            ee_track.append(np.copy(hand_xyz))
-            ee_angles_track.append(transformations.euler_from_matrix(
-                robot_config.R('EE', feedback['q']), axes='rxyz'))
-            target_track.append(np.copy(target[:3]))
-            target_angles_track.append(np.copy(target[3:]))
-            count += 1
-
-            # once we have the object, keep reaching to the target as the user
-            # changes it
             if reach['type'] == 'target_reach':
-                at_target = False
-            # the reason we differentiate hold and n timesteps is that hold is how
-            # long we want to wait to allow for the action, mainly used for grasping,
-            # whereas n_timesteps determines the number of steps in the path planner.
-            # we check n_timesteps*2 to allow the arm to catch up to the path planner
-            else:
-                if reach['hold_timesteps'] is not None:
-                    if count >= reach['hold_timesteps']:
-                        at_target = True
+                traj_planner.reset(
+                    position=hand_xyz,
+                    target_pos=(final_xyz + np.array([0, 0, reach['z_offset']])))
+
+            at_target = False
+            count = 0
+            while not at_target:
+                # check for our exit command (caps lock)
+                if interface.viewer.exit:
+                    glfw.destroy_window(interface.viewer.window)
+                    break
+
+                prev_reach_mode = reach_mode
+                _, reach_mode = get_reach_mode()
+                if prev_reach_mode != reach_mode:
+                    reach_list = _
+                    break
+
+                # get our user shifted drop off location
+                old_final_xyz = final_xyz
+                final_xyz = target_shift(
+                    interface=interface,
+                    base_location=final_xyz,
+                    scale=0.05,
+                    xlim=[-0.5, 0.5],
+                    ylim=[-0.5, 0.5],
+                    zlim=[0.0, 0.7])
+
+                # get arm feedback
+                feedback = interface.get_feedback()
+                hand_xyz = robot_config.Tx('EE', feedback['q'])
+
+                # update our path planner position and orientation
+                if reach['type'] == 'target_reach':
+                    error = np.linalg.norm(
+                        (hand_xyz - (final_xyz + np.array([0, 0, reach['z_offset']]))))
+                    if not np.allclose(final_xyz, old_final_xyz, atol=1e-5):
+                        traj_planner.reset(
+                            position=pos,
+                            target_pos=(final_xyz + np.array([0, 0, reach['z_offset']])))
+                    pos, vel = traj_planner._step(error=error)
+
                 else:
-                    if error < 0.02:
-                        at_target = True
-                    elif count > reach['n_timesteps']*2:
-                        at_target = True
+                    error = np.linalg.norm((hand_xyz-target_data['approach_pos']))
+                    pos, vel = traj_planner.next()
+
+                #TODO will need to update the orientation planner somehow, not using
+                # dmps so can't use reset, may need to regen and change n_timesteps?
+                orient = orientation_planner.next()
+                target = np.hstack([pos, orient])
+
+                # set our path planner visualization and final drop off location
+                interface.set_mocap_xyz('target', final_xyz)
+                # interface.set_mocap_xyz('path_planner_orientation', target[:3])
+                # interface.set_mocap_orientation('path_planner_orientation',
+                #     transformations.quaternion_from_euler(
+                #         orient[0], orient[1], orient[2], 'rxyz'))
+
+                # calculate our osc control signal
+                u = reach['ctrlr'].generate(
+                    q=feedback['q'],
+                    dq=feedback['dq'],
+                    target=target,
+                    #target_vel=np.hstack([vel, np.zeros(3)])
+                    )
+
+                # get our gripper command
+                u_gripper = np.ones(3) * reach['grasp_force']
+
+                # stack our control signals and send to mujoco, stepping the sim forward
+                u = np.hstack((u, u_gripper))
+                interface.send_forces(u, update_display=True if count % 2 == 0 else False)
+
+                # calculate our 2norm error
+                if count % 500 == 0:
+                    print('error: ', error)
+
+                # track data
+                ee_track.append(np.copy(hand_xyz))
+                ee_angles_track.append(transformations.euler_from_matrix(
+                    robot_config.R('EE', feedback['q']), axes='rxyz'))
+                target_track.append(np.copy(target[:3]))
+                target_angles_track.append(np.copy(target[3:]))
+                count += 1
+
+                # once we have the object, keep reaching to the target as the user
+                # changes it
+                if reach['type'] == 'target_reach':
+                    at_target = False
+                # the reason we differentiate hold and n timesteps is that hold is how
+                # long we want to wait to allow for the action, mainly used for grasping,
+                # whereas n_timesteps determines the number of steps in the path planner.
+                # we check n_timesteps*2 to allow the arm to catch up to the path planner
+                else:
+                    if reach['hold_timesteps'] is not None:
+                        if count >= reach['hold_timesteps']:
+                            at_target = True
+                    else:
+                        if error < 0.02:
+                            at_target = True
+                        elif count > reach['n_timesteps']*2:
+                            at_target = True
+
+        interface.viewer.reach_mode = 'reach_target'
+        print('reset to reach')
 
 finally:
     # stop and reset the simulation
