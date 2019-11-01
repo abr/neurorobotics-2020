@@ -40,12 +40,12 @@ ee_track = []
 ee_angles_track = []
 target_track = []
 target_angles_track = []
-object_xyz = np.array([-0.5, 0.0, 0.0])
+object_xyz = np.array([-0.5, 0.0, 0.02])
 deposit_xyz = np.array([0.4, 0.5, 0.2])
 
 rot_wrist = True
 open_force = 3
-close_force = -5
+close_force = -3
 
 try:
     reach_list = {
@@ -57,9 +57,9 @@ try:
             'start_pos': None,
             'orientation': None,
             'n_timesteps': 1000,
-            'grasp_force': open_force,
+            'grasp_force': close_force,
             'hold_timesteps': None,
-            'z_offset': 0.3,
+            'z_offset': 0.4,
             'approach_buffer': 0.02,
             'ctrlr': osc6dof(robot_config),
             'traj_planner': second_order_path_planner,
@@ -75,7 +75,7 @@ try:
             'grasp_force': open_force,
             'hold_timesteps': None,
             'z_offset': 0.055,
-            'approach_buffer': -0.02,
+            'approach_buffer': 0.0,
             'ctrlr': osc6dof(robot_config),
             'traj_planner': second_order_path_planner,
             'z_rot': np.pi,
@@ -101,7 +101,7 @@ try:
             'target_pos': object_xyz,
             'start_pos': None,
             'orientation': None,
-            'n_timesteps': 300,
+            'n_timesteps': 100,
             'grasp_force': close_force,
             'hold_timesteps': None,
             'z_offset': 0.2,
@@ -135,7 +135,7 @@ try:
             'start_pos': None,
             'orientation': None,
             'n_timesteps': 1000,
-            'grasp_force': close_force*2,
+            'grasp_force': close_force,
             'hold_timesteps': None,
             'z_offset': 0.3,
             'approach_buffer': 0.0,
@@ -150,7 +150,7 @@ try:
             'start_pos': None,
             'orientation': None,
             'n_timesteps': 300,
-            'grasp_force': close_force*2,
+            'grasp_force': close_force,
             'hold_timesteps': None,
             'z_offset': 0.02,
             'approach_buffer': 0.0,
@@ -165,8 +165,8 @@ try:
             'start_pos': None,
             'orientation': None,
             'n_timesteps': 500,
-            'grasp_force': open_force,
-            'hold_timesteps': 500,
+            'grasp_force': open_force*4,
+            'hold_timesteps': 600,
             'z_offset': 0.01,
             'approach_buffer': 0.0,
             'ctrlr': osc6dof(robot_config),
@@ -183,7 +183,7 @@ try:
             'n_timesteps': 1000,
             'grasp_force': open_force,
             'hold_timesteps': None,
-            'z_offset': 0.2,
+            'z_offset': 0.4,
             'approach_buffer': 0.02,
             'ctrlr': osc6dof(robot_config),
             'traj_planner': second_order_path_planner,
@@ -342,8 +342,8 @@ try:
                 else:
                     if error < 0.02:
                         at_target = True
-                    # elif count > reach['n_timesteps']*2:
-                    #     at_target = True
+                    elif count > reach['n_timesteps']*2 and error < 0.07:
+                            at_target = True
 
             if mode_change:
                 break
