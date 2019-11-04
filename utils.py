@@ -172,9 +172,9 @@ def osc6dof(robot_config):
     # create operational space controller
     ctrlr = OSC(
         robot_config,
-        kp=100,  # position gain
-        kv=20,
-        ko=180,  # orientation gain
+        kp=140,  # position gain
+        kv=30,
+        ko=250,  # orientation gain
         null_controllers=[damping],
         vmax=None,  # [m/s, rad/s]
         # control all DOF [x, y, z, alpha, beta, gamma]

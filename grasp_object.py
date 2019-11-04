@@ -104,8 +104,8 @@ try:
             'n_timesteps': 100,
             'grasp_force': close_force,
             'hold_timesteps': None,
-            'z_offset': 0.2,
-            'approach_buffer': 0.03,
+            'z_offset': 0.4,
+            'approach_buffer': 0.0,
             'ctrlr': osc6dof(robot_config),
             'traj_planner': second_order_path_planner,
             'z_rot': np.pi,
@@ -292,10 +292,13 @@ try:
 
                 # set our path planner visualization and final drop off location
                 interface.set_mocap_xyz('target', final_xyz)
-                # interface.set_mocap_xyz('path_planner_orientation', target[:3])
-                # interface.set_mocap_orientation('path_planner_orientation',
-                #     transformations.quaternion_from_euler(
-                #         orient[0], orient[1], orient[2], 'rxyz'))
+                if interface.viewer.path_vis:
+                    interface.set_mocap_xyz('path_planner_orientation', target[:3])
+                    interface.set_mocap_orientation('path_planner_orientation',
+                        transformations.quaternion_from_euler(
+                            orient[0], orient[1], orient[2], 'rxyz'))
+                else:
+                    interface.set_mocap_xyz('path_planner_orientation', np.array([0, 0, -1]))
 
                 # calculate our osc control signal
                 u = reach['ctrlr'].generate(
@@ -344,6 +347,8 @@ try:
                         at_target = True
                     elif count > reach['n_timesteps']*2 and error < 0.07:
                             at_target = True
+
+                interface.viewer.custom_print = '%s\nerror: %.3fm' % (reach['label'], error)
 
             if mode_change:
                 break
