@@ -166,6 +166,7 @@ def get_approach_path(
 
     return path_planner, orientation_planner, target_data
 
+
 def osc6dof(robot_config, rest_angles=None):
     # damp the movements of the arm
     damping = Damping(robot_config, kv=10)
@@ -186,6 +187,7 @@ def osc6dof(robot_config, rest_angles=None):
         # control all DOF [x, y, z, alpha, beta, gamma]
         ctrlr_dof = [True, True, True, True, True, True])
     return ctrlr
+
 
 def osc3dof(robot_config, rest_angles=None):
     # damp the movements of the arm
@@ -284,7 +286,6 @@ def adapt(in_index, spherical):
 
     return adaptive
 
-
 def second_order_path_planner(n_timesteps=1000, error_scale=1e-3):
     """
     Define your path planner of choice here
@@ -301,6 +302,7 @@ def second_order_path_planner(n_timesteps=1000, error_scale=1e-3):
 #
 #     traj_planner = path_planners.FirstOrderArc(n_timesteps=n_timesteps)
 #     return traj_planner
+
 
 def target_shift(interface, base_location, scale=0.01, xlim=None, ylim=None, zlim=None):
     """
@@ -347,5 +349,3 @@ def target_shift(interface, base_location, scale=0.01, xlim=None, ylim=None, zli
     interface.viewer.target_z = 0
 
     return shifted_target
-
-

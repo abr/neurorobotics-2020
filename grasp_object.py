@@ -62,153 +62,153 @@ rot_wrist = True
 open_force = 3
 close_force = -3
 
+reach_list = {
+    'pick_up': [
+        # GRASP AND LIFT
+        # move above object
+        {'label': 'move above object',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': 'object',
+        'n_timesteps': 1000,
+        'grasp_force': close_force,
+        'hold_timesteps': None,
+        'z_offset': 0.4,
+        'approach_buffer': 0.02,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
+        },
+        # get into grasping position
+        {'label': 'get into grasp position',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': 'object',
+        'n_timesteps': 300,
+        'grasp_force': open_force,
+        'hold_timesteps': None,
+        'z_offset': 0.055,
+        'approach_buffer': 0.0,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
+        },
+        # grasp object
+        {'label': 'grasp object',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': 'object',
+        'n_timesteps': 500,
+        'grasp_force': close_force,
+        'hold_timesteps': 500,
+        'z_offset': 0.055,
+        'approach_buffer': 0,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
+        },
+        # lift object
+        {'label': 'lift object',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': None,
+        'n_timesteps': 100,
+        'grasp_force': close_force,
+        'hold_timesteps': None,
+        'z_offset': 0.4,
+        'approach_buffer': 0.0,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
+        }],
+
+    'reach_target' : [
+        {'label': 'reach to target',
+        'target_pos': deposit_xyz,
+        'start_pos': None,
+        'orientation': None,
+        'n_timesteps': 100,
+        'grasp_force': close_force,
+        'hold_timesteps': None,
+        'ctrlr': osc3dof(robot_config),
+        'z_offset': 0,
+        'approach_buffer': 0,
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi/2,
+        'rot_wrist': False
+        }],
+
+    'drop_off' : [
+        # go above drop off
+        {'label': 'go above drop off',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': 'shifted',
+        'n_timesteps': 1000,
+        'grasp_force': close_force,
+        'hold_timesteps': None,
+        'z_offset': 0.3,
+        'approach_buffer': 0.0,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
+        },
+        # go to drop off
+        {'label': 'go to drop off',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': 'shifted',
+        'n_timesteps': 300,
+        'grasp_force': close_force,
+        'hold_timesteps': None,
+        'z_offset': 0.02,
+        'approach_buffer': 0.0,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
+        },
+        # release
+        {'label': 'release object',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': 'shifted',
+        'n_timesteps': 500,
+        'grasp_force': open_force*6,
+        'hold_timesteps': 600,
+        'z_offset': 0.01,
+        'approach_buffer': 0.0,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
+        },
+
+        # move above object
+        {'label': 'lift clear of object',
+        'target_pos': object_xyz,
+        'start_pos': None,
+        'orientation': None,
+        'n_timesteps': 1000,
+        'grasp_force': open_force,
+        'hold_timesteps': None,
+        'z_offset': 0.4,
+        'approach_buffer': 0.02,
+        'ctrlr': osc6dof(robot_config),
+        'traj_planner': second_order_path_planner,
+        'z_rot': np.pi,
+        'rot_wrist': rot_wrist
+        },
+        ]
+    }
+
+
 try:
-    reach_list = {
-        'pick_up': [
-            # GRASP AND LIFT
-            # move above object
-            {'label': 'move above object',
-            'target_pos': object_xyz,
-            'start_pos': None,
-            'orientation': None,
-            'n_timesteps': 1000,
-            'grasp_force': close_force,
-            'hold_timesteps': None,
-            'z_offset': 0.4,
-            'approach_buffer': 0.02,
-            'ctrlr': osc6dof(robot_config, rest_angles),
-            'traj_planner': second_order_path_planner,
-            'z_rot': np.pi,
-            'rot_wrist': rot_wrist
-            },
-            # get into grasping position
-            {'label': 'get into grasp position',
-            'target_pos': object_xyz,
-            'start_pos': None,
-            'orientation': None,
-            'n_timesteps': 300,
-            'grasp_force': open_force,
-            'hold_timesteps': None,
-            'z_offset': 0.055,
-            'approach_buffer': 0.0,
-            'ctrlr': osc6dof(robot_config, rest_angles),
-            'traj_planner': second_order_path_planner,
-            'z_rot': np.pi,
-            'rot_wrist': rot_wrist
-            },
-            # grasp object
-            {'label': 'grasp object',
-            'target_pos': object_xyz,
-            'start_pos': None,
-            'orientation': None,
-            'n_timesteps': 500,
-            'grasp_force': close_force,
-            'hold_timesteps': 500,
-            'z_offset': 0.055,
-            'approach_buffer': 0,
-            'ctrlr': osc6dof(robot_config, rest_angles),
-            'traj_planner': second_order_path_planner,
-            'z_rot': np.pi,
-            'rot_wrist': rot_wrist
-            },
-            # lift object
-            {'label': 'lift object',
-            'target_pos': object_xyz,
-            'start_pos': None,
-            'orientation': None,
-            'n_timesteps': 100,
-            'grasp_force': close_force,
-            'hold_timesteps': None,
-            'z_offset': 0.4,
-            'approach_buffer': 0.0,
-            'ctrlr': osc6dof(robot_config, rest_angles),
-            'traj_planner': second_order_path_planner,
-            'z_rot': np.pi,
-            'rot_wrist': rot_wrist
-            }],
-
-        'reach_target' : [
-            {'label': 'reach to target',
-            'target_pos': deposit_xyz,
-            'start_pos': None,
-            'orientation': None,
-            'n_timesteps': 100,
-            'grasp_force': close_force,
-            'hold_timesteps': None,
-            'ctrlr': osc3dof(robot_config, rest_angles),
-            'z_offset': 0,
-            'approach_buffer': 0,
-            'traj_planner': second_order_path_planner,
-            'z_rot': np.pi/2,
-            'rot_wrist': False
-            }],
-
-        'drop_off' : [
-            # go above drop off
-            {'label': 'go above drop off',
-            'target_pos': object_xyz,
-            'start_pos': None,
-            'orientation': None,
-            'n_timesteps': 1000,
-            'grasp_force': close_force,
-            'hold_timesteps': None,
-            'z_offset': 0.3,
-            'approach_buffer': 0.0,
-            'ctrlr': osc6dof(robot_config, rest_angles),
-            'traj_planner': second_order_path_planner,
-            'z_rot': np.pi,
-            'rot_wrist': rot_wrist
-            },
-            # go to drop off
-            {'label': 'go to drop off',
-            'target_pos': object_xyz,
-            'start_pos': None,
-            'orientation': None,
-            'n_timesteps': 300,
-            'grasp_force': close_force,
-            'hold_timesteps': None,
-            'z_offset': 0.02,
-            'approach_buffer': 0.0,
-            'ctrlr': osc6dof(robot_config, rest_angles),
-            'traj_planner': second_order_path_planner,
-            'z_rot': np.pi,
-            'rot_wrist': rot_wrist
-            },
-            # release
-            {'label': 'release object',
-            'target_pos': object_xyz,
-            'start_pos': None,
-            'orientation': None,
-            'n_timesteps': 500,
-            'grasp_force': open_force*10,
-            'hold_timesteps': 600,
-            'z_offset': 0.01,
-            'approach_buffer': 0.0,
-            'ctrlr': osc6dof(robot_config, rest_angles),
-            'traj_planner': second_order_path_planner,
-            'z_rot': np.pi,
-            'rot_wrist': rot_wrist
-            },
-
-            # move above object
-            {'label': 'lift clear of object',
-            'target_pos': object_xyz,
-            'start_pos': None,
-            'orientation': None,
-            'n_timesteps': 1000,
-            'grasp_force': open_force,
-            'hold_timesteps': None,
-            'z_offset': 0.4,
-            'approach_buffer': 0.02,
-            'ctrlr': osc6dof(robot_config, rest_angles),
-            'traj_planner': second_order_path_planner,
-            'z_rot': np.pi,
-            'rot_wrist': rot_wrist
-            },
-            ]
-        }
-
-
     print('\nSimulation starting...\n')
     interface.viewer._paused = pause
     final_xyz = deposit_xyz
@@ -228,6 +228,25 @@ try:
             # if we're reaching to target, update with user changes
             if reach_mode == 'reach_target':
                 reach['target_pos'] = final_xyz
+
+            print('Next reach')
+            if reach['orientation'] == 'object':
+                # target orientation should be that of an object in the environment
+                quat = interface.get_orientation('handle', object_type='geom')
+                theta = -np.pi/4
+                xyz = np.array([0, 1, 0])
+                rot = np.hstack([np.cos(theta), np.sin(theta)*xyz])
+                quat = transformations.quaternion_multiply(quat, rot)
+                theta = np.pi/2
+                xyz = np.array([1, 0, 0])
+                rot = np.hstack([np.cos(theta), np.sin(theta)*xyz])
+                quat = transformations.quaternion_multiply(quat, rot)
+                reach['orientation'] = quat
+
+            elif reach['orientation'] == 'shifted':
+                # target orientation should be shifted to account for the object
+                # in the hand having slipped / rotated
+
 
             # calculate our position and orientation path planners, with their
             # corresponding approach
