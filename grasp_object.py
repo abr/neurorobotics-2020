@@ -287,11 +287,15 @@ try:
                 if reach_mode == 'reach_target':
                     error = np.linalg.norm(
                         (hand_xyz - (final_xyz + np.array([0, 0, reach['z_offset']]))))
-                    if not np.allclose(final_xyz, old_final_xyz, atol=1e-5):
-                        traj_planner.reset(
-                            position=pos,
-                            target_pos=(final_xyz + np.array([0, 0, reach['z_offset']])))
-                    pos, vel = traj_planner._step(error=error)
+                    if error < 0.05:
+                        pos = final_xyz + reach['z_offset']
+                        vel = np.zeros(3)
+                    else:
+                        if not np.allclose(final_xyz, old_final_xyz, atol=1e-5):
+                            traj_planner.reset(
+                                position=pos,
+                                target_pos=(final_xyz + np.array([0, 0, reach['z_offset']])))
+                        pos, vel = traj_planner._step(error=error)
                     orient = np.zeros(3)
 
                 else:

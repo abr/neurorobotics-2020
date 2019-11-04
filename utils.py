@@ -172,7 +172,7 @@ def osc6dof(robot_config, rest_angles=None):
     null = [damping]
     # rest_angles = robot_config.START_ANGLES
     if rest_angles is not None:
-        rest = RestingConfig(robot_config, rest_angles, kp=2, kv=0)
+        rest = RestingConfig(robot_config, rest_angles, kp=4, kv=0)
         null.append(rest)
 
     # create operational space controller
@@ -193,14 +193,14 @@ def osc3dof(robot_config, rest_angles=None):
     null = [damping]
     # rest_angles = robot_config.START_ANGLES
     if rest_angles is not None:
-        rest = RestingConfig(robot_config, rest_angles, kp=2, kv=0)
+        rest = RestingConfig(robot_config, rest_angles, kp=4, kv=0)
         null.append(rest)
 
     # create operational space controller
     ctrlr = OSC(
         robot_config,
-        kp=30,  # position gain
-        kv=20,
+        kp=250,  # position gain
+        kv=25,
         null_controllers=null,
         vmax=None,  # [m/s, rad/s]
         # control all DOF [x, y, z, alpha, beta, gamma]
@@ -208,6 +208,14 @@ def osc3dof(robot_config, rest_angles=None):
     return ctrlr
 
 def adapt(in_index, spherical):
+    """
+    Parameters
+    ----------
+    in_index: list of booleans
+        which input dimensions are being adapted
+    spherical: boolean
+        whether or not to use spherical conversion
+    """
     n_input = np.sum(in_index) * 2 + spherical
     n_neurons = 1000
     n_ensembles = 1
@@ -264,7 +272,7 @@ def adapt(in_index, spherical):
         n_output=5,
         n_neurons=n_neurons,
         n_ensembles=n_ensembles,
-        pes_learning_rate=5e-4,
+        pes_learning_rate=1e-3,
         intercepts=intercepts,
         weights=weights,
         seed=0,
