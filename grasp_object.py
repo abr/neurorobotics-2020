@@ -38,7 +38,8 @@ hand_xyz = robot_config.Tx('EE', feedback['q'])
 # initialize our resting config
 # rest_angles = [None, None, robot_config.START_ANGLES[2], None, None, None]
 # rest_angles = [None, robot_config.START_ANGLES[1], None, None, None, None]
-rest_angles = [None, robot_config.START_ANGLES[1], robot_config.START_ANGLES[2], None, None, None]
+rest_angles = [None, 3.14, None, None, None, None]
+# rest_angles = [None, robot_config.START_ANGLES[1], robot_config.START_ANGLES[2], None, None, None]
 
 # set up lists for tracking data
 ee_track = []
