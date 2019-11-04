@@ -35,6 +35,11 @@ interface.send_target_angles((robot_config.START_ANGLES+joint_offset))
 feedback = interface.get_feedback()
 hand_xyz = robot_config.Tx('EE', feedback['q'])
 
+# initialize our resting config
+# rest_angles = [None, None, robot_config.START_ANGLES[2], None, None, None]
+# rest_angles = [None, robot_config.START_ANGLES[1], None, None, None, None]
+rest_angles = [None, robot_config.START_ANGLES[1], robot_config.START_ANGLES[2], None, None, None]
+
 # set up lists for tracking data
 ee_track = []
 ee_angles_track = []
@@ -61,7 +66,7 @@ try:
             'hold_timesteps': None,
             'z_offset': 0.4,
             'approach_buffer': 0.02,
-            'ctrlr': osc6dof(robot_config),
+            'ctrlr': osc6dof(robot_config, rest_angles),
             'traj_planner': second_order_path_planner,
             'z_rot': np.pi,
             'rot_wrist': rot_wrist
@@ -76,7 +81,7 @@ try:
             'hold_timesteps': None,
             'z_offset': 0.055,
             'approach_buffer': 0.0,
-            'ctrlr': osc6dof(robot_config),
+            'ctrlr': osc6dof(robot_config, rest_angles),
             'traj_planner': second_order_path_planner,
             'z_rot': np.pi,
             'rot_wrist': rot_wrist
@@ -91,7 +96,7 @@ try:
             'hold_timesteps': 500,
             'z_offset': 0.055,
             'approach_buffer': 0,
-            'ctrlr': osc6dof(robot_config),
+            'ctrlr': osc6dof(robot_config, rest_angles),
             'traj_planner': second_order_path_planner,
             'z_rot': np.pi,
             'rot_wrist': rot_wrist
@@ -106,7 +111,7 @@ try:
             'hold_timesteps': None,
             'z_offset': 0.4,
             'approach_buffer': 0.0,
-            'ctrlr': osc6dof(robot_config),
+            'ctrlr': osc6dof(robot_config, rest_angles),
             'traj_planner': second_order_path_planner,
             'z_rot': np.pi,
             'rot_wrist': rot_wrist
@@ -120,7 +125,7 @@ try:
             'n_timesteps': 100,
             'grasp_force': close_force,
             'hold_timesteps': None,
-            'ctrlr': osc3dof(robot_config),
+            'ctrlr': osc3dof(robot_config, rest_angles),
             'z_offset': 0,
             'approach_buffer': 0,
             'traj_planner': second_order_path_planner,
@@ -139,7 +144,7 @@ try:
             'hold_timesteps': None,
             'z_offset': 0.3,
             'approach_buffer': 0.0,
-            'ctrlr': osc6dof(robot_config),
+            'ctrlr': osc6dof(robot_config, rest_angles),
             'traj_planner': second_order_path_planner,
             'z_rot': np.pi,
             'rot_wrist': rot_wrist
@@ -154,7 +159,7 @@ try:
             'hold_timesteps': None,
             'z_offset': 0.02,
             'approach_buffer': 0.0,
-            'ctrlr': osc6dof(robot_config),
+            'ctrlr': osc6dof(robot_config, rest_angles),
             'traj_planner': second_order_path_planner,
             'z_rot': np.pi,
             'rot_wrist': rot_wrist
@@ -169,7 +174,7 @@ try:
             'hold_timesteps': 600,
             'z_offset': 0.01,
             'approach_buffer': 0.0,
-            'ctrlr': osc6dof(robot_config),
+            'ctrlr': osc6dof(robot_config, rest_angles),
             'traj_planner': second_order_path_planner,
             'z_rot': np.pi,
             'rot_wrist': rot_wrist
@@ -185,7 +190,7 @@ try:
             'hold_timesteps': None,
             'z_offset': 0.4,
             'approach_buffer': 0.02,
-            'ctrlr': osc6dof(robot_config),
+            'ctrlr': osc6dof(robot_config, rest_angles),
             'traj_planner': second_order_path_planner,
             'z_rot': np.pi,
             'rot_wrist': rot_wrist
@@ -199,15 +204,14 @@ try:
     final_xyz = deposit_xyz
 
     # ------ START DEMO -------
+    visible_target = 'target_red'
+    hidden_target = 'target_green'
     while 1:
         mode_change = False
         reach_mode =  interface.viewer.reach_mode
-        print('MAIN MODE: ', reach_mode)
 
         # go through each phase of the reach type
         for reach in reach_list[reach_mode]:
-            print('LOOP MODE: ', reach_mode)
-            print('LABEL: ', reach['label'])
             count = 0
             hand_xyz = robot_config.Tx('EE', feedback['q'])
 
@@ -215,7 +219,6 @@ try:
             if reach_mode == 'reach_target':
                 reach['target_pos'] = final_xyz
 
-            print('Next reach')
             # calculate our position and orientation path planners, with their
             # corresponding approach
             traj_planner, orientation_planner, target_data = get_approach_path(
@@ -291,7 +294,8 @@ try:
                 target = np.hstack([pos, orient])
 
                 # set our path planner visualization and final drop off location
-                interface.set_mocap_xyz('target', final_xyz)
+                interface.set_mocap_xyz(visible_target, final_xyz)
+                interface.set_mocap_xyz(hidden_target, np.array([0, 0, -1]))
                 if interface.viewer.path_vis:
                     interface.set_mocap_xyz('path_planner_orientation', target[:3])
                     interface.set_mocap_orientation('path_planner_orientation',
@@ -318,7 +322,6 @@ try:
                 # calculate our 2norm error
                 if count % 500 == 0:
                     print('error: ', error)
-                    print('count: ', count)
 
                 # track data
                 ee_track.append(np.copy(hand_xyz))
@@ -342,11 +345,15 @@ try:
                 if reach['hold_timesteps'] is not None:
                     if count >= reach['hold_timesteps']:
                         at_target = True
-                else:
-                    if error < 0.02:
+                elif error < 0.02:
+                    at_target = True
+                    visible_target = 'target_green'
+                    hidden_target = 'target_red'
+                elif count > reach['n_timesteps']*2 and error < 0.07:
                         at_target = True
-                    elif count > reach['n_timesteps']*2 and error < 0.07:
-                            at_target = True
+                else:
+                    visible_target = 'target_red'
+                    hidden_target = 'target_green'
 
                 interface.viewer.custom_print = '%s\nerror: %.3fm' % (reach['label'], error)
 
@@ -357,7 +364,6 @@ try:
         # so switch to reaching to target
         if not mode_change and reach_mode != 'reach_target':
             interface.viewer.reach_mode = 'reach_target'
-            print('reset to reach')
 
 finally:
     # stop and reset the simulation

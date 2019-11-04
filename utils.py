@@ -1,6 +1,6 @@
 import numpy as np
 
-from abr_control.controllers import OSC, Damping
+from abr_control.controllers import OSC, Damping, RestingConfig
 from abr_control.controllers import path_planners
 from abr_control.utils import transformations
 
@@ -165,9 +165,14 @@ def get_approach_path(
 
     return path_planner, orientation_planner, target_data
 
-def osc6dof(robot_config):
+def osc6dof(robot_config, rest_angles=None):
     # damp the movements of the arm
     damping = Damping(robot_config, kv=10)
+    null = [damping]
+    # rest_angles = robot_config.START_ANGLES
+    if rest_angles is not None:
+        rest = RestingConfig(robot_config, rest_angles, kp=2, kv=0)
+        null.append(rest)
 
     # create operational space controller
     ctrlr = OSC(
@@ -175,22 +180,27 @@ def osc6dof(robot_config):
         kp=100,  # position gain
         kv=20,
         ko=180,  # orientation gain
-        null_controllers=[damping],
+        null_controllers=null,
         vmax=None,  # [m/s, rad/s]
         # control all DOF [x, y, z, alpha, beta, gamma]
         ctrlr_dof = [True, True, True, True, True, True])
     return ctrlr
 
-def osc3dof(robot_config):
+def osc3dof(robot_config, rest_angles=None):
     # damp the movements of the arm
     damping = Damping(robot_config, kv=10)
+    null = [damping]
+    # rest_angles = robot_config.START_ANGLES
+    if rest_angles is not None:
+        rest = RestingConfig(robot_config, rest_angles, kp=2, kv=0)
+        null.append(rest)
 
     # create operational space controller
     ctrlr = OSC(
         robot_config,
         kp=250,  # position gain
         kv=25,
-        null_controllers=[damping],
+        null_controllers=null,
         vmax=None,  # [m/s, rad/s]
         # control all DOF [x, y, z, alpha, beta, gamma]
         ctrlr_dof = [True, True, True, False, False, False])
