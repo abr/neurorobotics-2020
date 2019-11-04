@@ -16,7 +16,7 @@ from abr_control.arms.mujoco_config import MujocoConfig as arm
 from abr_control.interfaces.mujoco import Mujoco
 from abr_control.utils import transformations
 
-from utils import get_approach_path, osc6dof, osc3dof, second_order_path_planner, target_shift
+from utils import get_approach_path, osc6dof, osc3dof, second_order_path_planner, target_shift, adapt
 
 plot = False
 pause = False
@@ -25,6 +25,15 @@ if len(sys.argv) > 1:
 
 # initialize our robot config
 robot_config = arm('jaco2_gripper')
+
+spherical = True
+in_index = [True, True, True, True, True, False]
+n_input_joints = np.sum(in_index)
+out_index = [True, True, True, True, True, False]
+n_output_joints = np.sum(out_index)
+input_signal = np.zeros(np.sum(in_index) * 2)
+u_adapt = np.zeros(robot_config.N_JOINTS)
+adapt = adapt(in_index=in_index, spherical=spherical)
 
 # create our interface
 interface = Mujoco(robot_config, dt=.001)
@@ -313,15 +322,29 @@ try:
                     #target_vel=np.hstack([vel, np.zeros(3)])
                     )
 
+                # adaptive control, if toggled on
+                if interface.viewer.adapt:
+                    training_signal = reach['ctrlr'].training_signal[out_index]
+                    input_signal[:n_input_joints] = feedback['q'][in_index]
+                    input_signal[n_input_joints:] = feedback['dq'][in_index]
+                    u_adapt[in_index] = adapt.generate(
+                        input_signal=input_signal, training_signal=training_signal)
+                else:
+                    u_adapt = np.zeros(robot_config.N_JOINTS)
+
+                u += u_adapt
+
                 # get our gripper command
                 u_gripper = np.ones(3) * reach['grasp_force']
 
                 # stack our control signals and send to mujoco, stepping the sim forward
                 u = np.hstack((u, u_gripper))
+
                 interface.send_forces(u, update_display=True if count % 1 == 0 else False)
 
                 # calculate our 2norm error
                 if count % 500 == 0:
+                    print('u adapt: ', u_adapt)
                     print('error: ', error)
 
                 # track data

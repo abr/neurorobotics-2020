@@ -1,8 +1,9 @@
 import numpy as np
 
 from abr_control.controllers import OSC, Damping, RestingConfig
-from abr_control.controllers import path_planners
+from abr_control.controllers import path_planners, signals
 from abr_control.utils import transformations
+from nengolib.stats import ScatteredHypersphere
 
 
 def _get_approach(
@@ -198,14 +199,82 @@ def osc3dof(robot_config, rest_angles=None):
     # create operational space controller
     ctrlr = OSC(
         robot_config,
-        kp=250,  # position gain
-        kv=25,
+        kp=30,  # position gain
+        kv=20,
         null_controllers=null,
         vmax=None,  # [m/s, rad/s]
         # control all DOF [x, y, z, alpha, beta, gamma]
         ctrlr_dof = [True, True, True, False, False, False])
     return ctrlr
 
+def adapt(in_index, spherical):
+    n_input = np.sum(in_index) * 2 + spherical
+    n_neurons = 1000
+    n_ensembles = 1
+
+    # means and variances
+    variances_q = np.ones(6) * 6.28
+    variances_dq = np.ones(6) * 1.25
+    variances = np.hstack((
+        variances_q[in_index], variances_dq[in_index]))
+    means_q = np.zeros(6)
+    means_dq = np.zeros(6)
+    means = np.hstack((
+        means_q[in_index], means_dq[in_index]))
+
+    # start with all zeros
+    weights = None
+
+    # intercepts
+    intercept_bounds = [-0.3, -0.1]
+    intercept_mode = -0.2
+    intercepts = signals.dynamics_adaptation.AreaIntercepts(
+        dimensions=n_input,
+        base=signals.dynamics_adaptation.Triangular(
+            intercept_bounds[0],
+            intercept_mode,
+            intercept_bounds[1]))
+
+    intercepts = np.array(intercepts.sample(
+        n_neurons * n_ensembles))
+
+    intercepts = intercepts.reshape(
+        n_ensembles, n_neurons)
+
+    # encoders
+    hypersphere = ScatteredHypersphere(surface=True)
+    encoders = hypersphere.sample(
+        n_neurons * n_ensembles, n_input)
+
+    # not incoporated, but sometimes we zero enc dims at this step
+    # if cpu['zeroed_enc_range'] is not None:
+    #     cpu['encoders'] = scripts.zero_encoder_dims.run(
+    #         encoders=cpu['encoders'],
+    #         zeroed_dims=cpu['zeroed_enc_range'])
+
+    encoders = (encoders.reshape(
+        n_ensembles, n_neurons, n_input))
+
+    # we need to include the spherical dimension to get our encoders
+    # to the right dimensionality, but on instantiation of the adaptive
+    # controller we exclude it, as the class handles this depending on
+    # spherical conversion
+    adaptive = signals.dynamics_adaptation.DynamicsAdaptation(
+        n_input=n_input-spherical,
+        n_output=5,
+        n_neurons=n_neurons,
+        n_ensembles=n_ensembles,
+        pes_learning_rate=5e-4,
+        intercepts=intercepts,
+        weights=weights,
+        seed=0,
+        encoders=encoders,
+        means=means,
+        variances=variances,
+        spherical=spherical
+        )
+
+    return adaptive
 
 
 def second_order_path_planner(n_timesteps=1000, error_scale=1e-3):
