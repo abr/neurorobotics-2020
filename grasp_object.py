@@ -165,7 +165,7 @@ try:
             'start_pos': None,
             'orientation': None,
             'n_timesteps': 500,
-            'grasp_force': open_force*4,
+            'grasp_force': open_force*10,
             'hold_timesteps': 600,
             'z_offset': 0.01,
             'approach_buffer': 0.0,
