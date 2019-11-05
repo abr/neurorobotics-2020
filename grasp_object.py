@@ -59,7 +59,7 @@ object_xyz = np.array([-0.5, 0.0, 0.02])
 deposit_xyz = np.array([0.4, 0.5, 0.2])
 
 rot_wrist = True
-open_force = 3
+open_force = 6
 close_force = -3
 
 reach_list = {
@@ -67,9 +67,9 @@ reach_list = {
         # GRASP AND LIFT
         # move above object
         {'label': 'move above object',
-        'target_pos': object_xyz,
+        'target_pos': None,
         'start_pos': None,
-        'orientation': 'object',
+        'orientation': None,
         'n_timesteps': 1000,
         'grasp_force': close_force,
         'hold_timesteps': None,
@@ -78,41 +78,44 @@ reach_list = {
         'ctrlr': osc6dof(robot_config),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': rot_wrist
+        'rot_wrist': rot_wrist,
+        'target_options': 'object',
         },
         # get into grasping position
         {'label': 'get into grasp position',
-        'target_pos': object_xyz,
+        'target_pos': 'object',
         'start_pos': None,
         'orientation': 'object',
         'n_timesteps': 300,
         'grasp_force': open_force,
         'hold_timesteps': None,
-        'z_offset': 0.055,
+        'z_offset': -0.01,
         'approach_buffer': 0.0,
         'ctrlr': osc6dof(robot_config),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': rot_wrist
+        'rot_wrist': rot_wrist,
+        'target_options': 'object',
         },
         # grasp object
         {'label': 'grasp object',
-        'target_pos': object_xyz,
+        'target_pos': 'object',
         'start_pos': None,
         'orientation': 'object',
         'n_timesteps': 500,
         'grasp_force': close_force,
         'hold_timesteps': 500,
-        'z_offset': 0.055,
+        'z_offset': -0.01,
         'approach_buffer': 0,
         'ctrlr': osc6dof(robot_config),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': rot_wrist
+        'rot_wrist': rot_wrist,
+        'target_options': 'object',
         },
         # lift object
         {'label': 'lift object',
-        'target_pos': object_xyz,
+        'target_pos': 'object',
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 100,
@@ -123,7 +126,8 @@ reach_list = {
         'ctrlr': osc6dof(robot_config),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': rot_wrist
+        'rot_wrist': rot_wrist,
+        'target_options': 'object',
         }],
 
     'reach_target' : [
@@ -139,7 +143,8 @@ reach_list = {
         'approach_buffer': 0,
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi/2,
-        'rot_wrist': False
+        'rot_wrist': False,
+        'target_options': None,
         }],
 
     'drop_off' : [
@@ -147,7 +152,7 @@ reach_list = {
         {'label': 'go above drop off',
         'target_pos': object_xyz,
         'start_pos': None,
-        'orientation': 'shifted',
+        'orientation': None,
         'n_timesteps': 1000,
         'grasp_force': close_force,
         'hold_timesteps': None,
@@ -156,13 +161,14 @@ reach_list = {
         'ctrlr': osc6dof(robot_config),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': rot_wrist
+        'rot_wrist': rot_wrist,
+        'target_options': 'shifted',
         },
         # go to drop off
         {'label': 'go to drop off',
         'target_pos': object_xyz,
         'start_pos': None,
-        'orientation': 'shifted',
+        'orientation': None,
         'n_timesteps': 300,
         'grasp_force': close_force,
         'hold_timesteps': None,
@@ -171,13 +177,14 @@ reach_list = {
         'ctrlr': osc6dof(robot_config),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': rot_wrist
+        'rot_wrist': rot_wrist,
+        'target_options': 'shifted2',
         },
         # release
         {'label': 'release object',
         'target_pos': object_xyz,
         'start_pos': None,
-        'orientation': 'shifted',
+        'orientation': None,
         'n_timesteps': 500,
         'grasp_force': open_force*6,
         'hold_timesteps': 600,
@@ -186,7 +193,8 @@ reach_list = {
         'ctrlr': osc6dof(robot_config),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': rot_wrist
+        'rot_wrist': rot_wrist,
+        'target_options': 'shifted2',
         },
 
         # move above object
@@ -202,11 +210,21 @@ reach_list = {
         'ctrlr': osc6dof(robot_config),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
-        'rot_wrist': rot_wrist
+        'rot_wrist': rot_wrist,
+        'target_options': 'shifted2',
         },
         ]
     }
 
+theta1 = -np.pi/4
+xyz1 = np.array([0, 1, 0])
+rot1_quat = np.hstack([np.cos(theta1), np.sin(theta1)*xyz1])
+
+theta2 = np.pi/2
+xyz2 = np.array([1, 0, 0])
+rot2_quat = np.hstack([np.cos(theta2), np.sin(theta2)*xyz2])
+
+start_diff_quat = transformations.quaternion_multiply(rot1_quat, rot2_quat)
 
 try:
     print('\nSimulation starting...\n')
@@ -230,22 +248,46 @@ try:
                 reach['target_pos'] = final_xyz
 
             print('Next reach')
-            if reach['orientation'] == 'object':
+            if reach['target_options'] == 'object':
+
+                reach['target_pos'] = interface.get_xyz('handle', object_type='geom')
+
                 # target orientation should be that of an object in the environment
-                quat = interface.get_orientation('handle', object_type='geom')
-                theta = -np.pi/4
-                xyz = np.array([0, 1, 0])
-                rot = np.hstack([np.cos(theta), np.sin(theta)*xyz])
-                quat = transformations.quaternion_multiply(quat, rot)
-                theta = np.pi/2
-                xyz = np.array([1, 0, 0])
-                rot = np.hstack([np.cos(theta), np.sin(theta)*xyz])
-                quat = transformations.quaternion_multiply(quat, rot)
+                object_quat = interface.get_orientation('handle', object_type='geom')
+                quat = transformations.quaternion_multiply(object_quat, start_diff_quat)
+                start_quat = np.copy(quat)
                 reach['orientation'] = quat
 
-            elif reach['orientation'] == 'shifted':
-                # target orientation should be shifted to account for the object
-                # in the hand having slipped / rotated
+            elif reach['target_options'] == 'shifted':
+                # account for the object in the hand having slipped / rotated
+
+                # get xyz of the hand
+                hand_xyz = interface.get_xyz('EE', object_type='body')
+                # get xyz of the object
+                object_xyz = interface.get_xyz('handle', object_type='geom')
+
+                reach['target'] = object_xyz + (object_xyz - hand_xyz)
+
+
+                # get orientation of hand
+                hand_quat = interface.get_orientation('EE', object_type='body')
+                # get orientation of object
+                object_quat = interface.get_orientation('handle', object_type='geom')
+
+                # get the difference between them
+                new_diff_quat = transformations.quaternion_multiply(
+                    transformations.quaternion_inverse(object_quat), hand_quat)
+                # compare to the original difference between them
+                diff_quat = transformations.quaternion_multiply(
+                    start_diff_quat, transformations.quaternion_inverse(new_diff_quat))
+
+                # use the diff_quat to augment the target location
+                shifted_quat = transformations.quaternion_multiply(
+                    transformations.quaternion_inverse(diff_quat), start_quat)
+                reach['orientation'] = shifted_quat
+
+            elif reach['target_options'] == 'shifted2':
+                reach['orientation'] = shifted_quat
 
 
             # calculate our position and orientation path planners, with their
