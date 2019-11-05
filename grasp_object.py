@@ -26,6 +26,10 @@ if len(sys.argv) > 1:
 # initialize our robot config
 robot_config = arm('jaco2_gripper')
 
+# create our interface
+interface = Mujoco(robot_config, dt=.001)
+interface.connect()
+
 spherical = True
 in_index = [True, True, True, True, True, False]
 n_input_joints = np.sum(in_index)
@@ -35,9 +39,6 @@ input_signal = np.zeros(np.sum(in_index) * 2)
 u_adapt = np.zeros(robot_config.N_JOINTS)
 adapt = adapt(in_index=in_index, spherical=spherical)
 
-# create our interface
-interface = Mujoco(robot_config, dt=.001)
-interface.connect()
 joint_offset = np.array([0, 0, 0, 0, 0, 0])
 interface.send_target_angles((robot_config.START_ANGLES+joint_offset))
 
