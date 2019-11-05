@@ -436,6 +436,7 @@ try:
                 # print('fing_dq: ', finger_dq)
                 u_gripper = fkp * (reach['grasp_force'] - np.asarray(finger_q)) - fkv*np.asarray(finger_dq)
                 u_gripper = f_alpha * u_gripper + (1-f_alpha) * u_gripper_prev
+                u_gripper = np.clip(u_gripper, a_max=10, a_min=-10)
                 u_gripper_prev = np.copy(u_gripper)
                 u_grip_track.append(u_gripper)
                 q_fing_track.append(finger_q)
