@@ -57,11 +57,18 @@ ee_angles_track = []
 target_track = []
 target_angles_track = []
 object_xyz = np.array([-0.5, 0.0, 0.02])
-deposit_xyz = np.array([0.4, 0.5, 0.2])
+deposit_xyz = np.array([0.4, 0.5, 0.3])
 
 rot_wrist = True
-open_force = 5
-close_force = -5
+open_force = np.ones(3) * 1.1
+close_force = np.ones(3) * -0.2
+fkp = 144
+fkv = 15
+f_alpha = 7e-4
+u_grip_track = []
+q_fing_track = []
+dq_fing_track = []
+fing_targ_track = []
 
 reach_list = {
     'pick_up': [
@@ -75,7 +82,7 @@ reach_list = {
         'grasp_force': close_force,
         'hold_timesteps': None,
         'z_offset': 0.4,
-        'approach_buffer': 0.02,
+        'approach_buffer': 0.0,
         'ctrlr': osc6dof(robot_config, rest_angles),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
@@ -233,15 +240,22 @@ try:
     final_xyz = deposit_xyz
 
     # get joint ids for the gripper
-    # fingers = ['thumb_proximal', 'index_proximal', 'pinky_proximal']
-    # finger_ids = []
-    # for fing in fingers:
-    #     finger_ids.append(interface.get_joint_id(fing))
+    fingers = ['joint_thumb', 'joint_index', 'joint_pinky']
+    finger_ids = []
+    for fing in fingers:
+        finger_ids.append(interface.model.get_joint_qpos_addr(fing))
+
+    # print('finger ids: ', finger_ids)
+    # print('\n\nqpos before: ', interface.sim.data.qpos)
+    # interface.sim.data.qpos[finger_ids[2]] = np.copy([0.475])
+    # print('qpos after: ', interface.sim.data.qpos)
+    interface.sim.forward()
 
     # ------ START DEMO -------
     visible_target = 'target_red'
     hidden_target = 'target_green'
-    while 1:
+    end_sim = False
+    while not end_sim:
         mode_change = False
         reach_mode =  interface.viewer.reach_mode
 
@@ -254,7 +268,7 @@ try:
             if reach_mode == 'reach_target':
                 reach['target_pos'] = final_xyz
 
-            print('Next reach')
+            # print('Next reach')
             if reach['target_options'] == 'object':
 
                 reach['target_pos'] = interface.get_xyz('handle', object_type='geom')
@@ -322,13 +336,16 @@ try:
 
             at_target = False
             # continue the phase of the reach until the stop criteria is met
+            u_gripper_prev = np.zeros(3)
             while not at_target:
-                # finger_q = []
-                # for finger in finger_ids:
-                #     finger_q.append(interface.get_joint_pos(finger))
-                # print('finger_q: ', finger_q)
+                finger_q = []
+                finger_dq = []
+                for finger in fingers:
+                    finger_q.append(interface.sim.data.qpos[interface.sim.model.get_joint_qpos_addr(finger)])
+                    finger_dq.append(interface.sim.data.qvel[interface.sim.model.get_joint_qpos_addr(finger)])
                 # check for our exit command (caps lock)
                 if interface.viewer.exit:
+                    end_sim = True
                     glfw.destroy_window(interface.viewer.window)
                     break
 
@@ -413,10 +430,21 @@ try:
                 # get our gripper command
                 #NOTE interface lets you toggle gripper status with the 'n' key
                 #TODO remove the interface gripper control for actual demo
-                u_gripper = np.ones(3) * reach['grasp_force'] * interface.viewer.gripper
+                # u_gripper = np.ones(3) * reach['grasp_force'] * interface.viewer.gripper
+                # print('target: ', reach['grasp_force'])
+                # print('fing_q: ', finger_q)
+                # print('fing_dq: ', finger_dq)
+                u_gripper = fkp * (reach['grasp_force'] - np.asarray(finger_q)) - fkv*np.asarray(finger_dq)
+                u_gripper = f_alpha * u_gripper + (1-f_alpha) * u_gripper_prev
+                u_gripper_prev = np.copy(u_gripper)
+                u_grip_track.append(u_gripper)
+                q_fing_track.append(finger_q)
+                dq_fing_track.append(finger_dq)
+                fing_targ_track.append(reach['grasp_force'])
+                # print('u_grip: ', u_gripper)
 
                 # stack our control signals and send to mujoco, stepping the sim forward
-                u = np.hstack((u, u_gripper))
+                u = np.hstack((u, u_gripper*interface.viewer.gripper))
 
                 interface.send_forces(u, update_display=True if count % 1 == 0 else False)
 
@@ -464,6 +492,8 @@ try:
             if mode_change:
                 break
 
+        if end_sim:
+            break
         # if the user has not changed mode then we have finished our grasping phases
         # so switch to reaching to target
         if not mode_change and reach_mode != 'reach_target':
@@ -475,15 +505,38 @@ finally:
 
     print('Simulation terminated...')
 
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import axes3d  # pylint: disable=W0611
     ee_track = np.array(ee_track).T
     ee_angles_track = np.array(ee_angles_track).T
     target_track = np.array(target_track).T
     target_angles_track = np.array(target_angles_track).T
 
+    u_grip_track = np.asarray(u_grip_track)
+    q_fing_track = np.asarray(q_fing_track)
+    dq_fing_track = np.asarray(dq_fing_track)
+    fing_targ_track = np.asarray(fing_targ_track)
+    plt.figure()
+    plt.subplot(311)
+    title = ('kp_%s kv_%s alpha_%s' %(fkp, fkv, f_alpha))
+    plt.title(title)
+    plt.plot(u_grip_track)
+    plt.ylabel('u_fingers')
+    plt.legend(['thumb', 'index', 'pinky'])
+    plt.subplot(312)
+    plt.plot(q_fing_track)
+    plt.plot(fing_targ_track, 'r--')
+    plt.ylabel('q_fingers')
+    plt.legend(['thumb', 'index', 'pinky', 'target'])
+    plt.subplot(313)
+    plt.plot(dq_fing_track)
+    plt.ylabel('dq_fingers')
+    plt.legend(['thumb', 'index', 'pinky'])
+    plt.savefig(title.replace('.', '_'))
+    plt.show()
+
     if ee_track.shape[0] > 0 and plot==True:
         # plot distance from target and 3D trajectory
-        import matplotlib.pyplot as plt
-        from mpl_toolkits.mplot3d import axes3d  # pylint: disable=W0611
         label_pos = ['x', 'y', 'z']
         label_or = ['a', 'b', 'g']
         c = ['r', 'g', 'b']
@@ -517,3 +570,4 @@ finally:
                     target_track[-1, 2], label='target', c='g')
         ax3.legend()
         plt.show()
+
