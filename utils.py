@@ -179,7 +179,7 @@ def osc6dof(robot_config, rest_angles=None):
     # create operational space controller
     ctrlr = OSC(
         robot_config,
-        kp=100,  # position gain
+        kp=120,  # position gain
         kv=20,
         ko=180,  # orientation gain
         null_controllers=null,

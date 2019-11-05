@@ -60,8 +60,8 @@ object_xyz = np.array([-0.5, 0.0, 0.02])
 deposit_xyz = np.array([0.4, 0.5, 0.2])
 
 rot_wrist = True
-open_force = 6
-close_force = -3
+open_force = 5
+close_force = -5
 
 reach_list = {
     'pick_up': [
@@ -76,7 +76,7 @@ reach_list = {
         'hold_timesteps': None,
         'z_offset': 0.4,
         'approach_buffer': 0.02,
-        'ctrlr': osc6dof(robot_config),
+        'ctrlr': osc6dof(robot_config, rest_angles),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
@@ -92,7 +92,7 @@ reach_list = {
         'hold_timesteps': None,
         'z_offset': -0.01,
         'approach_buffer': 0.0,
-        'ctrlr': osc6dof(robot_config),
+        'ctrlr': osc6dof(robot_config, rest_angles),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
@@ -108,7 +108,7 @@ reach_list = {
         'hold_timesteps': 500,
         'z_offset': -0.01,
         'approach_buffer': 0,
-        'ctrlr': osc6dof(robot_config),
+        'ctrlr': osc6dof(robot_config, rest_angles),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
@@ -124,7 +124,7 @@ reach_list = {
         'hold_timesteps': None,
         'z_offset': 0.4,
         'approach_buffer': 0.0,
-        'ctrlr': osc6dof(robot_config),
+        'ctrlr': osc6dof(robot_config, rest_angles),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
@@ -139,7 +139,7 @@ reach_list = {
         'n_timesteps': 100,
         'grasp_force': close_force,
         'hold_timesteps': None,
-        'ctrlr': osc3dof(robot_config),
+        'ctrlr': osc3dof(robot_config, rest_angles),
         'z_offset': 0,
         'approach_buffer': 0,
         'traj_planner': second_order_path_planner,
@@ -159,7 +159,7 @@ reach_list = {
         'hold_timesteps': None,
         'z_offset': 0.3,
         'approach_buffer': 0.0,
-        'ctrlr': osc6dof(robot_config),
+        'ctrlr': osc6dof(robot_config, rest_angles),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
@@ -175,7 +175,7 @@ reach_list = {
         'hold_timesteps': None,
         'z_offset': 0.02,
         'approach_buffer': 0.0,
-        'ctrlr': osc6dof(robot_config),
+        'ctrlr': osc6dof(robot_config, rest_angles),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
@@ -187,11 +187,11 @@ reach_list = {
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 500,
-        'grasp_force': open_force*6,
+        'grasp_force': open_force,
         'hold_timesteps': 600,
         'z_offset': 0.01,
         'approach_buffer': 0.0,
-        'ctrlr': osc6dof(robot_config),
+        'ctrlr': osc6dof(robot_config, rest_angles),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
@@ -208,7 +208,7 @@ reach_list = {
         'hold_timesteps': None,
         'z_offset': 0.4,
         'approach_buffer': 0.02,
-        'ctrlr': osc6dof(robot_config),
+        'ctrlr': osc6dof(robot_config, rest_angles),
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
@@ -231,6 +231,12 @@ try:
     print('\nSimulation starting...\n')
     interface.viewer._paused = pause
     final_xyz = deposit_xyz
+
+    # get joint ids for the gripper
+    # fingers = ['thumb_proximal', 'index_proximal', 'pinky_proximal']
+    # finger_ids = []
+    # for fing in fingers:
+    #     finger_ids.append(interface.get_joint_id(fing))
 
     # ------ START DEMO -------
     visible_target = 'target_red'
@@ -317,6 +323,10 @@ try:
             at_target = False
             # continue the phase of the reach until the stop criteria is met
             while not at_target:
+                # finger_q = []
+                # for finger in finger_ids:
+                #     finger_q.append(interface.get_joint_pos(finger))
+                # print('finger_q: ', finger_q)
                 # check for our exit command (caps lock)
                 if interface.viewer.exit:
                     glfw.destroy_window(interface.viewer.window)
@@ -401,7 +411,9 @@ try:
                 u += u_adapt
 
                 # get our gripper command
-                u_gripper = np.ones(3) * reach['grasp_force']
+                #NOTE interface lets you toggle gripper status with the 'n' key
+                #TODO remove the interface gripper control for actual demo
+                u_gripper = np.ones(3) * reach['grasp_force'] * interface.viewer.gripper
 
                 # stack our control signals and send to mujoco, stepping the sim forward
                 u = np.hstack((u, u_gripper))
@@ -409,9 +421,9 @@ try:
                 interface.send_forces(u, update_display=True if count % 1 == 0 else False)
 
                 # calculate our 2norm error
-                if count % 500 == 0:
-                    print('u adapt: ', u_adapt)
-                    print('error: ', error)
+                # if count % 500 == 0:
+                #     print('u adapt: ', u_adapt)
+                #     print('error: ', error)
 
                 # track data
                 ee_track.append(np.copy(hand_xyz))
@@ -445,7 +457,9 @@ try:
                     visible_target = 'target_red'
                     hidden_target = 'target_green'
 
-                interface.viewer.custom_print = '%s\nerror: %.3fm' % (reach['label'], error)
+                interface.viewer.custom_print = (
+                    '%s\nerror: %.3fm\nGripper toggle: %i'
+                    % (reach['label'], error, interface.viewer.gripper))
 
             if mode_change:
                 break
