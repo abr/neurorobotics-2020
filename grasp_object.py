@@ -15,6 +15,7 @@ import sys
 from abr_control.arms.mujoco_config import MujocoConfig as arm
 from abr_control.interfaces.mujoco import Mujoco
 from abr_control.utils import transformations
+from abr_control.utils.transformations import quaternion_multiply, quaternion_inverse
 
 from utils import get_approach_path, osc6dof, osc3dof, second_order_path_planner, target_shift, adapt, first_order_arc
 
@@ -181,8 +182,8 @@ reach_list = {
         'traj_planner': first_order_arc,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
-        'target_options': 'shifted',
         'f_alpha': f_alpha_close
+        'target_options': None,
         },
         # go to drop off
         {'label': 'go to drop off',
@@ -198,8 +199,8 @@ reach_list = {
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
-        'target_options': 'shifted2',
         'f_alpha': f_alpha_close
+        'target_options': 'shifted',
         },
         # release
         {'label': 'release object',
@@ -239,15 +240,19 @@ reach_list = {
         ]
     }
 
-theta1 = -np.pi/4
-xyz1 = np.array([0, 1, 0])
-rot1_quat = np.hstack([np.cos(theta1), np.sin(theta1)*xyz1])
+theta1 = np.pi/2
+xyz1 = np.array([0, 0, 1])
+rot1_quat = transformations.quaternion_about_axis(theta1, xyz1)
 
 theta2 = np.pi/2
-xyz2 = np.array([1, 0, 0])
-rot2_quat = np.hstack([np.cos(theta2), np.sin(theta2)*xyz2])
+xyz2 = np.array([0, 1, 0])
+rot2_quat = transformations.quaternion_about_axis(theta2, xyz2)
 
-start_diff_quat = transformations.quaternion_multiply(rot1_quat, rot2_quat)
+theta3 = -np.pi/2
+xyz3 = np.array([1, 0, 0])
+rot3_quat = transformations.quaternion_about_axis(theta3, xyz3)
+
+rotQ = quaternion_multiply(rot3_quat, quaternion_multiply(rot2_quat, rot1_quat))
 
 try:
     print('\nSimulation starting...\n')
@@ -269,6 +274,7 @@ try:
     visible_target = 'target_red'
     hidden_target = 'target_green'
     end_sim = False
+
     while not end_sim:
         mode_change = False
         reach_mode =  interface.viewer.reach_mode
@@ -288,9 +294,9 @@ try:
                 reach['target_pos'] = interface.get_xyz('handle', object_type='geom')
 
                 # target orientation should be that of an object in the environment
-                object_quat = interface.get_orientation('handle', object_type='geom')
-                quat = transformations.quaternion_multiply(object_quat, start_diff_quat)
-                start_quat = np.copy(quat)
+                objQ = interface.get_orientation('handle', object_type='geom')
+                quat = quaternion_multiply(rotQ, objQ)
+                startQ = np.copy(quat)
                 reach['orientation'] = quat
 
             elif reach['target_options'] == 'shifted':
@@ -303,27 +309,22 @@ try:
 
                 reach['target'] = object_xyz + (object_xyz - hand_xyz)
 
+                # get current orientation of hand
+                handQ_prime = interface.get_orientation('EE', object_type='body')
+                # get current orientation of object
+                objQ_prime = interface.get_orientation('handle', object_type='geom')
 
-                # get orientation of hand
-                hand_quat = interface.get_orientation('EE', object_type='body')
-                # get orientation of object
-                object_quat = interface.get_orientation('handle', object_type='geom')
+                # get the difference between hand and object
+                rotQ_prime = quaternion_multiply(handQ_prime, quaternion_inverse(objQ_prime))
+                # compare with difference at start of movement
+                dQ = quaternion_multiply(rotQ_prime, quaternion_inverse(rotQ))
+                # transform the original target by the difference
+                shiftedQ = quaternion_multiply(dQ, startQ)
 
-                # get the difference between them
-                new_diff_quat = transformations.quaternion_multiply(
-                    transformations.quaternion_inverse(object_quat), hand_quat)
-                # compare to the original difference between them
-                diff_quat = transformations.quaternion_multiply(
-                    start_diff_quat, transformations.quaternion_inverse(new_diff_quat))
-
-                # use the diff_quat to augment the target location
-                # TODO need a default for start quat, get error if run release before pick up
-                shifted_quat = transformations.quaternion_multiply(
-                    transformations.quaternion_inverse(diff_quat), start_quat)
-                reach['orientation'] = shifted_quat
+                reach['orientation'] = shiftedQ
 
             elif reach['target_options'] == 'shifted2':
-                reach['orientation'] = shifted_quat
+                reach['orientation'] = shiftedQ
 
 
             # calculate our position and orientation path planners, with their
