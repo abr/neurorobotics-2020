@@ -5,6 +5,16 @@ from abr_control.controllers import path_planners, signals
 from abr_control.utils import transformations
 from nengolib.stats import ScatteredHypersphere
 
+import nengo
+import numpy as np
+import scipy.special
+
+from scipy.linalg import svd
+from scipy.special import beta, betainc, betaincinv
+from nengo.dists import Distribution, UniformHypersphere
+from nengo.utils.compat import is_integer
+
+
 
 def _get_approach(
         target_pos, approach_buffer=0.03, z_offset=0, z_rot=None, rot_wrist=False):
@@ -218,6 +228,7 @@ def adapt(in_index, spherical):
     spherical: boolean
         whether or not to use spherical conversion
     """
+    raise NotImplementedError
     n_input = np.sum(in_index) * 2 + spherical
     n_neurons = 1000
     n_ensembles = 10
@@ -269,7 +280,7 @@ def adapt(in_index, spherical):
     # to the right dimensionality, but on instantiation of the adaptive
     # controller we exclude it, as the class handles this depending on
     # spherical conversion
-    adaptive = signals.dynamics_adaptation.DynamicsAdaptation(
+    adaptive = DynamicsAdaptation(
         n_input=n_input-spherical,
         n_output=5,
         n_neurons=n_neurons,
@@ -353,3 +364,235 @@ def target_shift(interface, base_location, scale=0.01, xlim=None, ylim=None, zli
     interface.viewer.target_z = 0
 
     return shifted_target
+
+
+def scale_inputs(spherical, means, variances, input_signal):
+    """
+    Currently set to accept joint position and velocities as time
+    x dimension arrays, and returns them scaled based on the means and
+    variances set on instantiation
+
+    PARAMETERS
+    ----------
+    input_signal : numpy.array
+        the current desired input signal, typical joint positions and
+        velocities in [rad] and [rad/sec] respectively
+
+    The reason we do a shift by the means is to try and center the majority
+    of our expected input values in our scaling range, so when we stretch
+    them by variances they encompass more of our input range.
+    """
+    scaled_input = (input_signal - means) / variances
+
+    if spherical:
+        # from nengolib.stats import spherical_transform
+        # put into the 0-1 range
+        scaled_input = scaled_input / 2 + 0.5
+        # project onto unit hypersphere in larger state space
+        scaled_input = scaled_input.flatten()
+        scaled_input = spherical_transform(scaled_input.reshape(1, len(scaled_input)))
+
+    return scaled_input
+
+
+def get_weights(sim, conn_learn):
+    """ Save the current weights to the specified test_name folder
+
+    Save weights for individual runs. A group of runs is
+    classified as a session. Multiple sessions can then be used
+    to average over a set of learned runs. If session or run are set to None
+    then the test_name location will be searched for the highest numbered
+    folder and file respectively
+    """
+    return [sim.signals[sim.model.sig[conn]["weights"]] for conn in conn_learn]
+
+
+class AreaIntercepts(nengo.dists.Distribution):
+    """ Generate an optimally distributed set of intercepts in
+    high-dimensional space.
+    """
+
+    dimensions = nengo.params.NumberParam("dimensions")
+    base = nengo.dists.DistributionParam("base")
+
+    def __init__(self, dimensions, base=nengo.dists.Uniform(-1, 1)):
+        super(AreaIntercepts, self).__init__()
+        self.dimensions = dimensions
+        self.base = base
+
+    def __repr(self):
+        return "AreaIntercepts(dimensions=%r, base=%r)" % (self.dimensions, self.base)
+
+    def transform(self, x):
+        sign = 1
+        if x > 0:
+            x = -x
+            sign = -1
+        return sign * np.sqrt(
+            1 - scipy.special.betaincinv((self.dimensions + 1) / 2.0, 0.5, x + 1)
+        )
+
+    def sample(self, n, d=None, rng=np.random):
+        s = self.base.sample(n=n, d=d, rng=rng)
+        for ii, ss in enumerate(s):
+            s[ii] = self.transform(ss)
+        return s
+
+
+class Triangular(nengo.dists.Distribution):
+    """ Generate an optimally distributed set of intercepts in
+    high-dimensional space using a triangular distribution.
+    """
+
+    left = nengo.params.NumberParam("dimensions")
+    right = nengo.params.NumberParam("dimensions")
+    mode = nengo.params.NumberParam("dimensions")
+
+    def __init__(self, left, mode, right):
+        super(Triangular, self).__init__()
+        self.left = left
+        self.right = right
+        self.mode = mode
+
+    def __repr__(self):
+        return "Triangular(left=%r, mode=%r, right=%r)" % (
+            self.left,
+            self.mode,
+            self.right,
+        )
+
+    def sample(self, n, d=None, rng=np.random):
+        if d is None:
+            return rng.triangular(self.left, self.mode, self.right, size=n)
+        else:
+            return rng.triangular(self.left, self.mode, self.right, size=(n, d))
+
+
+def random_orthogonal(d, rng=None):
+    rng = np.random if rng is None else rng
+    m = UniformHypersphere(surface=True).sample(d, d, rng=rng)
+    u, s, v = svd(m)
+    return np.dot(u, v)
+
+class SphericalCoords(Distribution):
+
+    def __init__(self, m):
+        super(SphericalCoords, self).__init__()
+        self.m = m
+
+    def __repr__(self):
+        return "%s(%r)" % (type(self).__name__, self.m)
+
+    def sample(self, n, d=None, rng=np.random):
+        """Samples ``n`` points in ``d`` dimensions."""
+        shape = self._sample_shape(n, d)
+        y = rng.uniform(size=shape)
+        return self.ppf(y)
+
+    def pdf(self, x):
+        """Evaluates the PDF along the values ``x``."""
+        return (np.pi * np.sin(np.pi * x) ** (self.m-1) /
+                beta(self.m / 2., .5))
+
+    def cdf(self, x):
+        """Evaluates the CDF along the values ``x``."""
+        y = .5 * betainc(self.m / 2., .5, np.sin(np.pi * x) ** 2)
+        return np.where(x < .5, y, 1 - y)
+
+    def ppf(self, y):
+        """Evaluates the inverse CDF along the values ``x``."""
+        y_reflect = np.where(y < .5, y, 1 - y)
+        z_sq = betaincinv(self.m / 2., .5, 2 * y_reflect)
+        x = np.arcsin(np.sqrt(z_sq)) / np.pi
+        return np.where(y < .5, x, 1 - x)
+
+
+
+def spherical_transform(samples):
+    samples = np.asarray(samples)
+    samples = samples[:, None] if samples.ndim == 1 else samples
+    coords = np.empty_like(samples)
+    n, d = coords.shape
+
+    # inverse transform method (section 1.5.2)
+    for j in range(d):
+        coords[:, j] = SphericalCoords(d-j).ppf(samples[:, j])
+
+    # spherical coordinate transform
+    mapped = np.ones((n, d+1))
+    i = np.ones(d)
+    i[-1] = 2.0
+    s = np.sin(i[None, :] * np.pi * coords)
+    c = np.cos(i[None, :] * np.pi * coords)
+    mapped[:, 1:] = np.cumprod(s, axis=1)
+    mapped[:, :-1] *= c
+    return mapped
+
+
+def _rd_generate(n, d, seed=0.5):
+    """Generates the first ``n`` points in the ``R_d`` sequence."""
+
+    # http://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
+    def gamma(d, n_iter=20):
+        """Newton-Raphson-Method to calculate g = phi_d."""
+        x = 1.0
+        for _ in range(n_iter):
+            x -= (x**(d + 1) - x - 1) / ((d + 1) * x**d - 1)
+        return x
+
+    g = gamma(d)
+    alpha = np.zeros(d)
+    for j in range(d):
+        alpha[j] = (1/g) ** (j + 1) % 1
+
+    z = np.zeros((n, d))
+    z[0] = (seed + alpha) % 1
+    for i in range(1, n):
+        z[i] = (z[i-1] + alpha) % 1
+
+    return z
+
+
+class Rd(Distribution):
+    def __repr__(self):
+        return "%s()" % (type(self).__name__)
+
+    def sample(self, n, d=1, rng=np.random):
+        """Samples ``n`` points in ``d`` dimensions."""
+        if d == 1:
+            # Tile the points optimally. TODO: refactor
+            return np.linspace(1./n, 1, n)[:, None]
+        if d is None or not is_integer(d) or d < 1:
+            # TODO: this should be raised when the ensemble is created
+            raise ValueError("d (%d) must be positive integer" % d)
+        return _rd_generate(n, d)
+
+
+class ScatteredHypersphere(UniformHypersphere):
+
+    def __init__(self, surface, base=Rd()):
+        super(ScatteredHypersphere, self).__init__(surface)
+        self.base = base
+
+    def __repr__(self):
+        return "%s(surface=%r, base=%r)" % (
+            type(self).__name__, self.surface, self.base)
+
+    def sample(self, n, d=1, rng=np.random):
+        """Samples ``n`` points in ``d`` dimensions."""
+        if d == 1:
+            return super(ScatteredHypersphere, self).sample(n, d, rng)
+
+        if self.surface:
+            samples = self.base.sample(n, d-1, rng)
+            radius = 1.
+        else:
+            samples = self.base.sample(n, d, rng)
+            samples, radius = samples[:, :-1], samples[:, -1:] ** (1. / d)
+
+        mapped = spherical_transform(samples)
+
+        # radius adjustment for ball versus sphere, and a random rotation
+        rotation = random_orthogonal(d, rng=rng)
+        return np.dot(mapped * radius, rotation)
+
