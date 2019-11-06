@@ -16,7 +16,7 @@ from abr_control.arms.mujoco_config import MujocoConfig as arm
 from abr_control.interfaces.mujoco import Mujoco
 from abr_control.utils import transformations
 
-from utils import get_approach_path, osc6dof, osc3dof, second_order_path_planner, target_shift, adapt
+from utils import get_approach_path, osc6dof, osc3dof, second_order_path_planner, target_shift, adapt, first_order_arc
 
 plot = False
 pause = False
@@ -48,7 +48,7 @@ hand_xyz = robot_config.Tx('EE', feedback['q'])
 # initialize our resting config
 # rest_angles = [None, None, robot_config.START_ANGLES[2], None, None, None]
 # rest_angles = [None, robot_config.START_ANGLES[1], None, None, None, None]
-rest_angles = [None, 3.14, None, None, None, None]
+rest_angles = [None, 3.14, 1.57, None, None, None]
 # rest_angles = [None, robot_config.START_ANGLES[1], robot_config.START_ANGLES[2], None, None, None]
 
 # set up lists for tracking data
@@ -57,14 +57,18 @@ ee_angles_track = []
 target_track = []
 target_angles_track = []
 object_xyz = np.array([-0.5, 0.0, 0.02])
-deposit_xyz = np.array([0.4, 0.5, 0.3])
+deposit_xyz = np.array([-0.4, 0.5, 0.4])
+adapt_text = np.array([0, 1, 0])
 
 rot_wrist = True
-open_force = np.ones(3) * 1.1
-close_force = np.ones(3) * -0.2
+open_q = np.ones(3) * 1.1
+close_q = np.ones(3) * -0.1
+# max grip force
+max_grip = 15
 fkp = 144
 fkv = 15
-f_alpha = 7e-4
+f_alpha_close = 7e-4
+f_alpha_open = 1e-3
 u_grip_track = []
 q_fing_track = []
 dq_fing_track = []
@@ -79,15 +83,17 @@ reach_list = {
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 1000,
-        'grasp_force': close_force,
+        'grasp_pos': close_q,
         'hold_timesteps': None,
         'z_offset': 0.4,
-        'approach_buffer': 0.0,
+        'approach_buffer': -0.02,
         'ctrlr': osc6dof(robot_config, rest_angles),
-        'traj_planner': second_order_path_planner,
+        # 'traj_planner': second_order_path_planner,
+        'traj_planner': first_order_arc,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'object',
+        'f_alpha': f_alpha_close
         },
         # get into grasping position
         {'label': 'get into grasp position',
@@ -95,7 +101,7 @@ reach_list = {
         'start_pos': None,
         'orientation': 'object',
         'n_timesteps': 300,
-        'grasp_force': open_force,
+        'grasp_pos': open_q,
         'hold_timesteps': None,
         'z_offset': -0.01,
         'approach_buffer': 0.0,
@@ -104,6 +110,7 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'object',
+        'f_alpha': f_alpha_open
         },
         # grasp object
         {'label': 'grasp object',
@@ -111,7 +118,7 @@ reach_list = {
         'start_pos': None,
         'orientation': 'object',
         'n_timesteps': 500,
-        'grasp_force': close_force,
+        'grasp_pos': close_q,
         'hold_timesteps': 500,
         'z_offset': -0.01,
         'approach_buffer': 0,
@@ -120,6 +127,7 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'object',
+        'f_alpha': f_alpha_close
         },
         # lift object
         {'label': 'lift object',
@@ -127,7 +135,7 @@ reach_list = {
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 100,
-        'grasp_force': close_force,
+        'grasp_pos': close_q,
         'hold_timesteps': None,
         'z_offset': 0.4,
         'approach_buffer': 0.0,
@@ -136,6 +144,7 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'object',
+        'f_alpha': f_alpha_close
         }],
 
     'reach_target' : [
@@ -144,7 +153,7 @@ reach_list = {
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 100,
-        'grasp_force': close_force,
+        'grasp_pos': close_q,
         'hold_timesteps': None,
         'ctrlr': osc3dof(robot_config, rest_angles),
         'z_offset': 0,
@@ -153,6 +162,7 @@ reach_list = {
         'z_rot': np.pi/2,
         'rot_wrist': False,
         'target_options': None,
+        'f_alpha': f_alpha_close
         }],
 
     'drop_off' : [
@@ -162,15 +172,17 @@ reach_list = {
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 1000,
-        'grasp_force': close_force,
+        'grasp_pos': close_q,
         'hold_timesteps': None,
         'z_offset': 0.3,
         'approach_buffer': 0.0,
         'ctrlr': osc6dof(robot_config, rest_angles),
-        'traj_planner': second_order_path_planner,
+        # 'traj_planner': second_order_path_planner,
+        'traj_planner': first_order_arc,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'shifted',
+        'f_alpha': f_alpha_close
         },
         # go to drop off
         {'label': 'go to drop off',
@@ -178,7 +190,7 @@ reach_list = {
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 300,
-        'grasp_force': close_force,
+        'grasp_pos': close_q,
         'hold_timesteps': None,
         'z_offset': 0.02,
         'approach_buffer': 0.0,
@@ -187,6 +199,7 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'shifted2',
+        'f_alpha': f_alpha_close
         },
         # release
         {'label': 'release object',
@@ -194,7 +207,7 @@ reach_list = {
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 500,
-        'grasp_force': open_force,
+        'grasp_pos': open_q,
         'hold_timesteps': 600,
         'z_offset': 0.01,
         'approach_buffer': 0.0,
@@ -203,6 +216,7 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'shifted2',
+        'f_alpha': f_alpha_open
         },
 
         # move above object
@@ -211,7 +225,7 @@ reach_list = {
         'start_pos': None,
         'orientation': None,
         'n_timesteps': 1000,
-        'grasp_force': open_force,
+        'grasp_pos': open_q,
         'hold_timesteps': None,
         'z_offset': 0.4,
         'approach_buffer': 0.02,
@@ -220,6 +234,7 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'shifted2',
+        'f_alpha': f_alpha_open
         },
         ]
     }
@@ -241,15 +256,14 @@ try:
 
     # get joint ids for the gripper
     fingers = ['joint_thumb', 'joint_index', 'joint_pinky']
-    finger_ids = []
-    for fing in fingers:
-        finger_ids.append(interface.model.get_joint_qpos_addr(fing))
-
-    # print('finger ids: ', finger_ids)
-    # print('\n\nqpos before: ', interface.sim.data.qpos)
-    # interface.sim.data.qpos[finger_ids[2]] = np.copy([0.475])
-    # print('qpos after: ', interface.sim.data.qpos)
-    interface.sim.forward()
+    # finger_ids = []
+    # for fing in fingers:
+    #     finger_ids.append(interface.model.get_joint_qpos_addr(fing))
+    #
+    # interface.sim.data.qpos[finger_ids[0]] = np.copy([-0.1])
+    # interface.sim.data.qpos[finger_ids[1]] = np.copy([-0.1])
+    # interface.sim.data.qpos[finger_ids[2]] = np.copy([-0.1])
+    # interface.sim.forward()
 
     # ------ START DEMO -------
     visible_target = 'target_red'
@@ -303,6 +317,7 @@ try:
                     start_diff_quat, transformations.quaternion_inverse(new_diff_quat))
 
                 # use the diff_quat to augment the target location
+                # TODO need a default for start quat, get error if run release before pick up
                 shifted_quat = transformations.quaternion_multiply(
                     transformations.quaternion_inverse(diff_quat), start_quat)
                 reach['orientation'] = shifted_quat
@@ -329,10 +344,10 @@ try:
 
 
             # reset our dmp since the user may be changing the target
-            if reach_mode == 'reach_target':
-                traj_planner.reset(
-                    position=hand_xyz,
-                    target_pos=(final_xyz + np.array([0, 0, reach['z_offset']])))
+            # if reach_mode == 'reach_target':
+            #     traj_planner.reset(
+            #         position=hand_xyz,
+            #         target_pos=(final_xyz + np.array([0, 0, reach['z_offset']])))
 
             at_target = False
             # continue the phase of the reach until the stop criteria is met
@@ -392,8 +407,6 @@ try:
                     pos, vel = traj_planner.next()
                     orient = orientation_planner.next()
 
-                #TODO will need to update the orientation planner somehow, not using
-                # dmps so can't use reset, may need to regen and change n_timesteps?
                 target = np.hstack([pos, orient])
 
                 # set our path planner visualization and final drop off location
@@ -422,27 +435,24 @@ try:
                     input_signal[n_input_joints:] = feedback['dq'][in_index]
                     u_adapt[in_index] = adapt.generate(
                         input_signal=input_signal, training_signal=training_signal)
+                    # TODO this can be optimized, only needs to be set if adaptation toggles
+                    interface.set_mocap_xyz('adapt_on', adapt_text)
+                    interface.set_mocap_xyz('adapt_off', [0, 0, -1])
                 else:
                     u_adapt = np.zeros(robot_config.N_JOINTS)
+                    # TODO this can be optimized, only needs to be set if adaptation toggles
+                    interface.set_mocap_xyz('adapt_off', adapt_text)
+                    interface.set_mocap_xyz('adapt_on', [0, 0, -1])
 
                 u += u_adapt
 
                 # get our gripper command
                 #NOTE interface lets you toggle gripper status with the 'n' key
                 #TODO remove the interface gripper control for actual demo
-                # u_gripper = np.ones(3) * reach['grasp_force'] * interface.viewer.gripper
-                # print('target: ', reach['grasp_force'])
-                # print('fing_q: ', finger_q)
-                # print('fing_dq: ', finger_dq)
-                u_gripper = fkp * (reach['grasp_force'] - np.asarray(finger_q)) - fkv*np.asarray(finger_dq)
-                u_gripper = f_alpha * u_gripper + (1-f_alpha) * u_gripper_prev
-                u_gripper = np.clip(u_gripper, a_max=10, a_min=-10)
+                u_gripper = fkp * (reach['grasp_pos'] - np.asarray(finger_q)) - fkv*np.asarray(finger_dq)
+                u_gripper = reach['f_alpha'] * u_gripper + (1-reach['f_alpha']) * u_gripper_prev
+                u_gripper = np.clip(u_gripper, a_max=max_grip, a_min=-max_grip)
                 u_gripper_prev = np.copy(u_gripper)
-                u_grip_track.append(u_gripper)
-                q_fing_track.append(finger_q)
-                dq_fing_track.append(finger_dq)
-                fing_targ_track.append(reach['grasp_force'])
-                # print('u_grip: ', u_gripper)
 
                 # stack our control signals and send to mujoco, stepping the sim forward
                 u = np.hstack((u, u_gripper*interface.viewer.gripper))
@@ -450,16 +460,22 @@ try:
                 interface.send_forces(u, update_display=True if count % 1 == 0 else False)
 
                 # calculate our 2norm error
-                # if count % 500 == 0:
+                # if count % 100 == 0:
                 #     print('u adapt: ', u_adapt)
-                #     print('error: ', error)
+                #     print('u gripper: ', u_gripper)
+                #     print('q fingers: ', finger_q)
 
                 # track data
-                ee_track.append(np.copy(hand_xyz))
-                ee_angles_track.append(transformations.euler_from_matrix(
-                    robot_config.R('EE', feedback['q']), axes='rxyz'))
-                target_track.append(np.copy(target[:3]))
-                target_angles_track.append(np.copy(target[3:]))
+                if plot:
+                    u_grip_track.append(u_gripper)
+                    q_fing_track.append(finger_q)
+                    dq_fing_track.append(finger_dq)
+                    fing_targ_track.append(reach['grasp_pos'])
+                    ee_track.append(np.copy(hand_xyz))
+                    ee_angles_track.append(transformations.euler_from_matrix(
+                        robot_config.R('EE', feedback['q']), axes='rxyz'))
+                    target_track.append(np.copy(target[:3]))
+                    target_angles_track.append(np.copy(target[3:]))
                 count += 1
 
                 # once we have the object, keep reaching to the target as the user
@@ -467,24 +483,27 @@ try:
                 if reach_mode == 'reach_target':
                     at_target = False
 
-                # the reason we differentiate hold and n timesteps is that hold is how
-                # long we want to wait to allow for the action, mainly used for grasping,
-                # whereas n_timesteps determines the number of steps in the path planner.
-                # we check n_timesteps*2 to allow the arm to catch up to the path planner
-                # else:
-
-                if reach['hold_timesteps'] is not None:
-                    if count >= reach['hold_timesteps']:
-                        at_target = True
-                elif error < 0.02:
-                    at_target = True
-                    visible_target = 'target_green'
-                    hidden_target = 'target_red'
-                elif count > reach['n_timesteps']*2 and error < 0.07:
-                        at_target = True
+                    if error < 0.02:
+                        visible_target = 'target_green'
+                        hidden_target = 'target_red'
+                    else:
+                        visible_target = 'target_red'
+                        hidden_target = 'target_green'
                 else:
                     visible_target = 'target_red'
                     hidden_target = 'target_green'
+
+                    # the reason we differentiate hold and n timesteps is that hold is how
+                    # long we want to wait to allow for the action, mainly used for grasping,
+                    # whereas n_timesteps determines the number of steps in the path planner.
+                    # we check n_timesteps*2 to allow the arm to catch up to the path planner
+                    # else:
+
+                    if reach['hold_timesteps'] is not None:
+                        if count >= reach['hold_timesteps']:
+                            at_target = True
+                    elif count > reach['n_timesteps']*2 and error < 0.07:
+                            at_target = True
 
                 interface.viewer.custom_print = (
                     '%s\nerror: %.3fm\nGripper toggle: %i'
@@ -517,24 +536,26 @@ finally:
     q_fing_track = np.asarray(q_fing_track)
     dq_fing_track = np.asarray(dq_fing_track)
     fing_targ_track = np.asarray(fing_targ_track)
-    plt.figure()
-    plt.subplot(311)
-    title = ('kp_%s kv_%s alpha_%s' %(fkp, fkv, f_alpha))
-    plt.title(title)
-    plt.plot(u_grip_track)
-    plt.ylabel('u_fingers')
-    plt.legend(['thumb', 'index', 'pinky'])
-    plt.subplot(312)
-    plt.plot(q_fing_track)
-    plt.plot(fing_targ_track, 'r--')
-    plt.ylabel('q_fingers')
-    plt.legend(['thumb', 'index', 'pinky', 'target'])
-    plt.subplot(313)
-    plt.plot(dq_fing_track)
-    plt.ylabel('dq_fingers')
-    plt.legend(['thumb', 'index', 'pinky'])
-    plt.savefig(title.replace('.', '_'))
-    plt.show()
+
+    if u_grip_track.shape[0] > 0 and plot==True:
+        plt.figure()
+        plt.subplot(311)
+        title = ('kp_%s kv_%s alpha_%s' %(fkp, fkv, reach['f_alpha']))
+        plt.title(title)
+        plt.plot(u_grip_track)
+        plt.ylabel('u_fingers')
+        plt.legend(['thumb', 'index', 'pinky'])
+        plt.subplot(312)
+        plt.plot(q_fing_track)
+        plt.plot(fing_targ_track, 'r--')
+        plt.ylabel('q_fingers')
+        plt.legend(['thumb', 'index', 'pinky', 'target'])
+        plt.subplot(313)
+        plt.plot(dq_fing_track)
+        plt.ylabel('dq_fingers')
+        plt.legend(['thumb', 'index', 'pinky'])
+        plt.savefig(title.replace('.', '_'))
+        plt.show()
 
     if ee_track.shape[0] > 0 and plot==True:
         # plot distance from target and 3D trajectory

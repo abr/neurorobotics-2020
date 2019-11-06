@@ -148,7 +148,7 @@ def get_approach_path(
         target_pos=target_pos, z_rot=z_rot, rot_wrist=rot_wrist, **kwargs)
 
     if target_orientation is not None:
-        print('Using manual target orientation')
+        # print('Using manual target orientation')
         approach_orient = target_orientation
 
     # generate our path to our approach position
@@ -201,7 +201,7 @@ def osc3dof(robot_config, rest_angles=None):
     # create operational space controller
     ctrlr = OSC(
         robot_config,
-        kp=250,  # position gain
+        kp=120,  # position gain
         kv=25,
         null_controllers=null,
         vmax=None,  # [m/s, rad/s]
@@ -220,7 +220,7 @@ def adapt(in_index, spherical):
     """
     n_input = np.sum(in_index) * 2 + spherical
     n_neurons = 1000
-    n_ensembles = 1
+    n_ensembles = 10
 
     # means and variances
     variances_q = np.ones(6) * 6.28
@@ -274,7 +274,7 @@ def adapt(in_index, spherical):
         n_output=5,
         n_neurons=n_neurons,
         n_ensembles=n_ensembles,
-        pes_learning_rate=1e-3,
+        pes_learning_rate=1e-4,
         intercepts=intercepts,
         weights=weights,
         seed=0,
@@ -292,6 +292,10 @@ def second_order_path_planner(n_timesteps=1000, error_scale=1e-3):
     """
     traj_planner = path_planners.BellShaped(
         error_scale=error_scale, n_timesteps=n_timesteps)
+    return traj_planner
+
+def first_order_arc(n_timesteps):
+    traj_planner = path_planners.FirstOrderArc(n_timesteps)
     return traj_planner
 
 
