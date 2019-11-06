@@ -201,8 +201,8 @@ def osc3dof(robot_config, rest_angles=None):
     # create operational space controller
     ctrlr = OSC(
         robot_config,
-        kp=120,  # position gain
-        kv=25,
+        kp=100,  # position gain
+        kv=20,
         null_controllers=null,
         vmax=None,  # [m/s, rad/s]
         # control all DOF [x, y, z, alpha, beta, gamma]
@@ -274,7 +274,7 @@ def adapt(in_index, spherical):
         n_output=5,
         n_neurons=n_neurons,
         n_ensembles=n_ensembles,
-        pes_learning_rate=1e-4,
+        pes_learning_rate=3e-4,
         intercepts=intercepts,
         weights=weights,
         seed=0,

@@ -65,7 +65,7 @@ rot_wrist = True
 open_q = np.ones(3) * 1.1
 close_q = np.ones(3) * -0.1
 # max grip force
-max_grip = 15
+max_grip = 8
 fkp = 144
 fkv = 15
 f_alpha_close = 7e-4
@@ -94,7 +94,8 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'object',
-        'f_alpha': f_alpha_close
+        'f_alpha': f_alpha_close,
+        'error_thres': 0.07
         },
         # get into grasping position
         {'label': 'get into grasp position',
@@ -111,7 +112,8 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'object',
-        'f_alpha': f_alpha_open
+        'f_alpha': f_alpha_open,
+        'error_thres': 0.02
         },
         # grasp object
         {'label': 'grasp object',
@@ -128,7 +130,8 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'object',
-        'f_alpha': f_alpha_close
+        'f_alpha': f_alpha_close,
+        'error_thres': 0.02
         },
         # lift object
         {'label': 'lift object',
@@ -145,7 +148,8 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'object',
-        'f_alpha': f_alpha_close
+        'f_alpha': f_alpha_close,
+        'error_thres': 0.02
         }],
 
     'reach_target' : [
@@ -163,7 +167,8 @@ reach_list = {
         'z_rot': np.pi/2,
         'rot_wrist': False,
         'target_options': None,
-        'f_alpha': f_alpha_close
+        'f_alpha': f_alpha_close,
+        'error_thres': 0.02
         }],
 
     'drop_off' : [
@@ -182,8 +187,9 @@ reach_list = {
         'traj_planner': first_order_arc,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
-        'f_alpha': f_alpha_close
         'target_options': None,
+        'f_alpha': f_alpha_close,
+        'error_thres': 0.07
         },
         # go to drop off
         {'label': 'go to drop off',
@@ -199,8 +205,9 @@ reach_list = {
         'traj_planner': second_order_path_planner,
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
-        'f_alpha': f_alpha_close
         'target_options': 'shifted',
+        'f_alpha': f_alpha_close,
+        'error_thres': 0.02
         },
         # release
         {'label': 'release object',
@@ -217,7 +224,8 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'shifted2',
-        'f_alpha': f_alpha_open
+        'f_alpha': f_alpha_open,
+        'error_thres': 0.02
         },
 
         # move above object
@@ -235,7 +243,8 @@ reach_list = {
         'z_rot': np.pi,
         'rot_wrist': rot_wrist,
         'target_options': 'shifted2',
-        'f_alpha': f_alpha_open
+        'f_alpha': f_alpha_open,
+        'error_thres': 0.1
         },
         ]
     }
@@ -484,7 +493,7 @@ try:
                 if reach_mode == 'reach_target':
                     at_target = False
 
-                    if error < 0.02:
+                    if error < reach['error_thres']:
                         visible_target = 'target_green'
                         hidden_target = 'target_red'
                     else:
