@@ -328,7 +328,7 @@ try:
                 # compare with difference at start of movement
                 dQ = quaternion_multiply(rotQ_prime, quaternion_inverse(rotQ))
                 # transform the original target by the difference
-                shiftedQ = quaternion_multiply(dQ, startQ)
+                shiftedQ = quaternion_multiply(startQ, dQ)
 
                 reach['orientation'] = shiftedQ
 
