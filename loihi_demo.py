@@ -120,7 +120,6 @@ target_geom_id = interface.sim.model.geom_name2id("target")
 
 with net:
 
-    net.count = 0
     net.old_reach_mode = None
     net.reach_index = -1
     net.next_reach = False
@@ -165,6 +164,7 @@ with net:
             )
 
             net.next_reach = False
+            net.count = 0
 
         # get the target location from the interface
         net.old_final_xyz = net.final_xyz
@@ -321,7 +321,7 @@ with net:
                 np.hstack([feedback["q"][:5], feedback["dq"][:5]]),
             )
             training_signal = -net.reach['ctrlr'].training_signal[:5]
-            output_signal = np.hstack([output, training_signal])
+            output_signal = np.hstack([context.flatten(), training_signal.flatten()])
         else:
             output_signal = OUTPUT_ZEROS
 
