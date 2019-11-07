@@ -15,39 +15,35 @@ from nengo.dists import Distribution, UniformHypersphere
 from nengo.utils.compat import is_integer
 
 
-
 def _get_approach(
-        target_pos, approach_buffer=0.03, z_offset=0, z_rot=None, rot_wrist=False):
+    target_pos, approach_buffer=0.03, offset=None, z_rot=None, rot_wrist=False
+):
     """
-    Takes the target location, and returns an
-    orientation to approach the target, along with a target position that
-    is approach_buffer meters short of the target, with a z offset
-    determined by z_offset in meters. The orientation is set to be a vector
-    that would connect the robot base to the target, with the gripper parallel
-    to the ground
+    Takes the target location, and returns an orientation to approach the target, along
+    with a target position that is approach_buffer meters short of the target, with an
+    xyz offset determined by offset in meters. The orientation is set to be a vector
+    that would connect the robot base to the target, with the gripper parallel to the
+    ground.
 
     Parameters
     ----------
     target_pos: list of 3 floats
         xyz cartesian loc of target of interest [meters]
     approach_buffer: float, Optional (Default: 0.03)
-        we want to approach the target along the orientation that connects
-        the base of the arm to the target, but we want to stop short before
-        going for the grasp. This variable sets that distance to stop short
-        of the target [meters]
-    z_offset: float, Optional (Default: 0.2)
-        sometimes it is desirable to approach a target from above or below.
-        This gets added to the final target position
+        we want to approach the target along the orientation that connects the base of
+        the arm to the target, but we want to stop short before going for the grasp.
+        This variable sets that distance to stop short of the target [meters]
+    offset: float, Optional (Default: None)
+        sometimes it is desirable to approach a target from above or below.  This gets
+        added to the final target position
     z_rot: float, optional (Default: pi/2)
-        rotates the z axis for the final approach
-        pi/2 to be parallel with ground (gripper pointing outwards)
-        pi to be perpendicular (gripper pointing down)
+        rotates the z axis for the final approach pi/2 to be parallel with ground
+        (gripper pointing outwards), pi to be perpendicular (gripper pointing down)
     rot_wrist: boolean, optional (Default: False)
-        True to rotate the gripper an additional pi/2 rad along the wrist
-        rotation axis
+        True to rotate the gripper an additional pi/2 rad along the wrist rotation axis
     """
     if z_rot is None:
-        theta1 = np.pi/2
+        theta1 = np.pi / 2
     else:
         theta1 = z_rot
 
@@ -61,47 +57,42 @@ def _get_approach(
     # target_z = np.copy(target_pos[2])
     target_pos = np.asarray(target_pos)
 
-
-    # get signs of target directions so our approach target stays in the same
-    # octant as the provided target
-    # target_sign = target_pos / abs(target_pos)
-
     dist_to_target = np.linalg.norm(target_pos)
     approach_vector = np.copy(target_pos)
     approach_vector /= np.linalg.norm(approach_vector)
     # print('get_approach target_pos: ', target_pos)
 
     approach_pos = approach_vector * (dist_to_target - approach_buffer)
-    #approach_vector[2] = 0
+    # approach_vector[2] = 0
 
     # world z pointing up, rotate by pi/2 to be parallel with ground
-    q1 = [np.cos(theta1/2),
-        0,
-        np.sin(theta1/2),
-        0
-        ]
+    q1 = [np.cos(theta1 / 2), 0, np.sin(theta1 / 2), 0]
     # now we rotate about z to get x pointing up
     theta2 = theta2_scale * np.arctan2(target_pos[1], target_pos[0])
     # print('theta2: ', theta2)
-    q2 = [np.cos(theta2/2),
-        0,
-        0,
-        np.sin(theta2/2),
-        ]
-
+    q2 = [np.cos(theta2 / 2), 0, 0, np.sin(theta2 / 2)]
 
     # get our combined rotation
     q3 = transformations.quaternion_multiply(q2, q1)
 
-    approach_pos[2] += z_offset
+    approach_pos += offset
 
     return approach_pos, q3
 
 
 def get_approach_path(
-        robot_config, path_planner, q, target_pos, max_reach_dist=None,
-        min_z=0, target_orientation=None, start_pos=None, z_rot=None,
-        rot_wrist=False, **kwargs):
+    robot_config,
+    path_planner,
+    q,
+    target_pos,
+    max_reach_dist=None,
+    min_z=0,
+    target_orientation=None,
+    start_pos=None,
+    z_rot=None,
+    rot_wrist=False,
+    **kwargs
+):
     """
     Accepts a robot config, path planner, and target_position, returns the
     generated position and orientation paths to approach the target for grasping
@@ -147,32 +138,32 @@ def get_approach_path(
         target_pos = target_pos / np.linalg.norm(target_pos) * max_reach_dist
 
     # get our EE starting orientation and position
-    starting_R = robot_config.R('EE', q)
-    starting_orientation = transformations.quaternion_from_matrix(
-        starting_R)
+    starting_R = robot_config.R("EE", q)
+    starting_orientation = transformations.quaternion_from_matrix(starting_R)
     if start_pos is None:
-        start_pos = robot_config.Tx('EE', q)
+        start_pos = robot_config.Tx("EE", q)
 
     # calculate our target approach position and orientation
     approach_pos, approach_orient = _get_approach(
-        target_pos=target_pos, z_rot=z_rot, rot_wrist=rot_wrist, **kwargs)
+        target_pos=target_pos, z_rot=z_rot, rot_wrist=rot_wrist, **kwargs
+    )
 
     if target_orientation is not None:
         # print('Using manual target orientation')
         approach_orient = target_orientation
 
     # generate our path to our approach position
-    path_planner.generate_path(
-        position=start_pos, target_pos=approach_pos)
+    path_planner.generate_path(position=start_pos, target_pos=approach_pos)
 
     # generate our orientation planner
     _, orientation_planner = path_planner.generate_orientation_path(
-        orientation=starting_orientation,
-        target_orientation=approach_orient)
+        orientation=starting_orientation, target_orientation=approach_orient
+    )
     target_data = {
-                'target_pos': target_pos,
-                'approach_pos': approach_pos,
-                'approach_orient': approach_orient}
+        "target_pos": target_pos,
+        "approach_pos": approach_pos,
+        "approach_orient": approach_orient,
+    }
 
     return path_planner, orientation_planner, target_data
 
@@ -195,7 +186,8 @@ def osc6dof(robot_config, rest_angles=None):
         null_controllers=null,
         vmax=None,  # [m/s, rad/s]
         # control all DOF [x, y, z, alpha, beta, gamma]
-        ctrlr_dof = [True, True, True, True, True, True])
+        ctrlr_dof=[True, True, True, True, True, True],
+    )
     return ctrlr
 
 
@@ -216,8 +208,10 @@ def osc3dof(robot_config, rest_angles=None):
         null_controllers=null,
         vmax=None,  # [m/s, rad/s]
         # control all DOF [x, y, z, alpha, beta, gamma]
-        ctrlr_dof = [True, True, True, False, False, False])
+        ctrlr_dof=[True, True, True, False, False, False],
+    )
     return ctrlr
+
 
 def adapt(in_index, spherical):
     """
@@ -228,7 +222,6 @@ def adapt(in_index, spherical):
     spherical: boolean
         whether or not to use spherical conversion
     """
-    # raise NotImplementedError
     n_input = np.sum(in_index) * 2 + spherical
     n_neurons = 1000
     n_ensembles = 10
@@ -236,12 +229,10 @@ def adapt(in_index, spherical):
     # means and variances
     variances_q = np.ones(6) * 6.28
     variances_dq = np.ones(6) * 1.25
-    variances = np.hstack((
-        variances_q[in_index], variances_dq[in_index]))
+    variances = np.hstack((variances_q[in_index], variances_dq[in_index]))
     means_q = np.zeros(6)
     means_dq = np.zeros(6)
-    means = np.hstack((
-        means_q[in_index], means_dq[in_index]))
+    means = np.hstack((means_q[in_index], means_dq[in_index]))
 
     # start with all zeros
     weights = None
@@ -252,20 +243,17 @@ def adapt(in_index, spherical):
     intercepts = signals.dynamics_adaptation.AreaIntercepts(
         dimensions=n_input,
         base=signals.dynamics_adaptation.Triangular(
-            intercept_bounds[0],
-            intercept_mode,
-            intercept_bounds[1]))
+            intercept_bounds[0], intercept_mode, intercept_bounds[1]
+        ),
+    )
 
-    intercepts = np.array(intercepts.sample(
-        n_neurons * n_ensembles))
+    intercepts = np.array(intercepts.sample(n_neurons * n_ensembles))
 
-    intercepts = intercepts.reshape(
-        n_ensembles, n_neurons)
+    intercepts = intercepts.reshape(n_ensembles, n_neurons)
 
     # encoders
     hypersphere = ScatteredHypersphere(surface=True)
-    encoders = hypersphere.sample(
-        n_neurons * n_ensembles, n_input)
+    encoders = hypersphere.sample(n_neurons * n_ensembles, n_input)
 
     # not incoporated, but sometimes we zero enc dims at this step
     # if cpu['zeroed_enc_range'] is not None:
@@ -273,15 +261,14 @@ def adapt(in_index, spherical):
     #         encoders=cpu['encoders'],
     #         zeroed_dims=cpu['zeroed_enc_range'])
 
-    encoders = (encoders.reshape(
-        n_ensembles, n_neurons, n_input))
+    encoders = encoders.reshape(n_ensembles, n_neurons, n_input)
 
     # we need to include the spherical dimension to get our encoders
     # to the right dimensionality, but on instantiation of the adaptive
     # controller we exclude it, as the class handles this depending on
     # spherical conversion
-    adaptive = signals.DynamicsAdaptation(
-        n_input=n_input-spherical,
+    adaptive = signals.dynamics_adaptation.DynamicsAdaptation(
+        n_input=n_input - spherical,
         n_output=5,
         n_neurons=n_neurons,
         n_ensembles=n_ensembles,
@@ -292,18 +279,21 @@ def adapt(in_index, spherical):
         encoders=encoders,
         means=means,
         variances=variances,
-        spherical=spherical
-        )
+        spherical=spherical,
+    )
 
     return adaptive
+
 
 def second_order_path_planner(n_timesteps=1000, error_scale=1e-3):
     """
     Define your path planner of choice here
     """
     traj_planner = path_planners.BellShaped(
-        error_scale=error_scale, n_timesteps=n_timesteps)
+        error_scale=error_scale, n_timesteps=n_timesteps
+    )
     return traj_planner
+
 
 def first_order_arc(n_timesteps):
     traj_planner = path_planners.FirstOrderArc(n_timesteps)
@@ -351,14 +341,20 @@ def target_shift(interface, base_location, scale=0.01, xlim=None, ylim=None, zli
         val = min(val, maximum)
         return val
 
-    shifted_target = base_location + scale * np.array([
-        interface.viewer.target_x,
-        interface.viewer.target_y,
-        interface.viewer.target_z])
-    shifted_target = np.array([
-        clip(shifted_target[0], xlim[0], xlim[1]),
-        clip(shifted_target[1], ylim[0], ylim[1]),
-        clip(shifted_target[2], zlim[0], zlim[1])])
+    shifted_target = base_location + scale * np.array(
+        [
+            interface.viewer.target_x,
+            interface.viewer.target_y,
+            interface.viewer.target_z,
+        ]
+    )
+    shifted_target = np.array(
+        [
+            clip(shifted_target[0], xlim[0], xlim[1]),
+            clip(shifted_target[1], ylim[0], ylim[1]),
+            clip(shifted_target[2], zlim[0], zlim[1]),
+        ]
+    )
     interface.viewer.target_x = 0
     interface.viewer.target_y = 0
     interface.viewer.target_z = 0
@@ -474,8 +470,8 @@ def random_orthogonal(d, rng=None):
     u, s, v = svd(m)
     return np.dot(u, v)
 
-class SphericalCoords(Distribution):
 
+class SphericalCoords(Distribution):
     def __init__(self, m):
         super(SphericalCoords, self).__init__()
         self.m = m
@@ -491,21 +487,19 @@ class SphericalCoords(Distribution):
 
     def pdf(self, x):
         """Evaluates the PDF along the values ``x``."""
-        return (np.pi * np.sin(np.pi * x) ** (self.m-1) /
-                beta(self.m / 2., .5))
+        return np.pi * np.sin(np.pi * x) ** (self.m - 1) / beta(self.m / 2.0, 0.5)
 
     def cdf(self, x):
         """Evaluates the CDF along the values ``x``."""
-        y = .5 * betainc(self.m / 2., .5, np.sin(np.pi * x) ** 2)
-        return np.where(x < .5, y, 1 - y)
+        y = 0.5 * betainc(self.m / 2.0, 0.5, np.sin(np.pi * x) ** 2)
+        return np.where(x < 0.5, y, 1 - y)
 
     def ppf(self, y):
         """Evaluates the inverse CDF along the values ``x``."""
-        y_reflect = np.where(y < .5, y, 1 - y)
-        z_sq = betaincinv(self.m / 2., .5, 2 * y_reflect)
+        y_reflect = np.where(y < 0.5, y, 1 - y)
+        z_sq = betaincinv(self.m / 2.0, 0.5, 2 * y_reflect)
         x = np.arcsin(np.sqrt(z_sq)) / np.pi
-        return np.where(y < .5, x, 1 - x)
-
+        return np.where(y < 0.5, x, 1 - x)
 
 
 def spherical_transform(samples):
@@ -516,10 +510,10 @@ def spherical_transform(samples):
 
     # inverse transform method (section 1.5.2)
     for j in range(d):
-        coords[:, j] = SphericalCoords(d-j).ppf(samples[:, j])
+        coords[:, j] = SphericalCoords(d - j).ppf(samples[:, j])
 
     # spherical coordinate transform
-    mapped = np.ones((n, d+1))
+    mapped = np.ones((n, d + 1))
     i = np.ones(d)
     i[-1] = 2.0
     s = np.sin(i[None, :] * np.pi * coords)
@@ -537,18 +531,18 @@ def _rd_generate(n, d, seed=0.5):
         """Newton-Raphson-Method to calculate g = phi_d."""
         x = 1.0
         for _ in range(n_iter):
-            x -= (x**(d + 1) - x - 1) / ((d + 1) * x**d - 1)
+            x -= (x ** (d + 1) - x - 1) / ((d + 1) * x ** d - 1)
         return x
 
     g = gamma(d)
     alpha = np.zeros(d)
     for j in range(d):
-        alpha[j] = (1/g) ** (j + 1) % 1
+        alpha[j] = (1 / g) ** (j + 1) % 1
 
     z = np.zeros((n, d))
     z[0] = (seed + alpha) % 1
     for i in range(1, n):
-        z[i] = (z[i-1] + alpha) % 1
+        z[i] = (z[i - 1] + alpha) % 1
 
     return z
 
@@ -561,7 +555,7 @@ class Rd(Distribution):
         """Samples ``n`` points in ``d`` dimensions."""
         if d == 1:
             # Tile the points optimally. TODO: refactor
-            return np.linspace(1./n, 1, n)[:, None]
+            return np.linspace(1.0 / n, 1, n)[:, None]
         if d is None or not is_integer(d) or d < 1:
             # TODO: this should be raised when the ensemble is created
             raise ValueError("d (%d) must be positive integer" % d)
@@ -569,14 +563,16 @@ class Rd(Distribution):
 
 
 class ScatteredHypersphere(UniformHypersphere):
-
     def __init__(self, surface, base=Rd()):
         super(ScatteredHypersphere, self).__init__(surface)
         self.base = base
 
     def __repr__(self):
         return "%s(surface=%r, base=%r)" % (
-            type(self).__name__, self.surface, self.base)
+            type(self).__name__,
+            self.surface,
+            self.base,
+        )
 
     def sample(self, n, d=1, rng=np.random):
         """Samples ``n`` points in ``d`` dimensions."""
@@ -584,15 +580,14 @@ class ScatteredHypersphere(UniformHypersphere):
             return super(ScatteredHypersphere, self).sample(n, d, rng)
 
         if self.surface:
-            samples = self.base.sample(n, d-1, rng)
-            radius = 1.
+            samples = self.base.sample(n, d - 1, rng)
+            radius = 1.0
         else:
             samples = self.base.sample(n, d, rng)
-            samples, radius = samples[:, :-1], samples[:, -1:] ** (1. / d)
+            samples, radius = samples[:, :-1], samples[:, -1:] ** (1.0 / d)
 
         mapped = spherical_transform(samples)
 
         # radius adjustment for ball versus sphere, and a random rotation
         rotation = random_orthogonal(d, rng=rng)
         return np.dot(mapped * radius, rotation)
-

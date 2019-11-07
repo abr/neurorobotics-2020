@@ -95,7 +95,7 @@ reach_list = {
         'rot_wrist': rot_wrist,
         'target_options': 'object',
         'f_alpha': f_alpha_close,
-        'error_thres': 0.07
+        'error_thresh': 0.07
         },
         # get into grasping position
         {'label': 'get into grasp position',
@@ -113,7 +113,7 @@ reach_list = {
         'rot_wrist': rot_wrist,
         'target_options': 'object',
         'f_alpha': f_alpha_open,
-        'error_thres': 0.02
+        'error_thresh': 0.02
         },
         # grasp object
         {'label': 'grasp object',
@@ -131,7 +131,7 @@ reach_list = {
         'rot_wrist': rot_wrist,
         'target_options': 'object',
         'f_alpha': f_alpha_close,
-        'error_thres': 0.02
+        'error_thresh': 0.02
         },
         # lift object
         {'label': 'lift object',
@@ -149,7 +149,7 @@ reach_list = {
         'rot_wrist': rot_wrist,
         'target_options': 'object',
         'f_alpha': f_alpha_close,
-        'error_thres': 0.02
+        'error_thresh': 0.02
         }],
 
     'reach_target' : [
@@ -168,7 +168,7 @@ reach_list = {
         'rot_wrist': False,
         'target_options': None,
         'f_alpha': f_alpha_close,
-        'error_thres': 0.02
+        'error_thresh': 0.02
         }],
 
     'drop_off' : [
@@ -189,7 +189,7 @@ reach_list = {
         'rot_wrist': rot_wrist,
         'target_options': None,
         'f_alpha': f_alpha_close,
-        'error_thres': 0.07
+        'error_thresh': 0.07
         },
         # go to drop off
         {'label': 'go to drop off',
@@ -207,7 +207,7 @@ reach_list = {
         'rot_wrist': rot_wrist,
         'target_options': 'shifted',
         'f_alpha': f_alpha_close,
-        'error_thres': 0.02
+        'error_thresh': 0.02
         },
         # release
         {'label': 'release object',
@@ -225,7 +225,7 @@ reach_list = {
         'rot_wrist': rot_wrist,
         'target_options': 'shifted2',
         'f_alpha': f_alpha_open,
-        'error_thres': 0.02
+        'error_thresh': 0.02
         },
 
         # move above object
@@ -244,7 +244,7 @@ reach_list = {
         'rot_wrist': rot_wrist,
         'target_options': 'shifted2',
         'f_alpha': f_alpha_open,
-        'error_thres': 0.1
+        'error_thresh': 0.1
         },
         ]
     }
@@ -495,7 +495,7 @@ try:
                 if reach_mode == 'reach_target':
                     at_target = False
 
-                    if error < reach['error_thres']:
+                    if error < reach['error_thresh']:
                         visible_target = 'target_green'
                         hidden_target = 'target_red'
                     else:
