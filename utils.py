@@ -228,7 +228,7 @@ def adapt(in_index, spherical):
     spherical: boolean
         whether or not to use spherical conversion
     """
-    raise NotImplementedError
+    # raise NotImplementedError
     n_input = np.sum(in_index) * 2 + spherical
     n_neurons = 1000
     n_ensembles = 10
@@ -280,7 +280,7 @@ def adapt(in_index, spherical):
     # to the right dimensionality, but on instantiation of the adaptive
     # controller we exclude it, as the class handles this depending on
     # spherical conversion
-    adaptive = DynamicsAdaptation(
+    adaptive = signals.DynamicsAdaptation(
         n_input=n_input-spherical,
         n_output=5,
         n_neurons=n_neurons,
