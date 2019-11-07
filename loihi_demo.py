@@ -24,10 +24,10 @@ from utils import (
     target_shift,
     adapt,
     first_order_arc,
+    calculate_reach_params,
 )
 
 from reach_list import gen_reach_list
-from calculate_targets import calculate_reach_params
 
 rng = np.random.RandomState(9)
 

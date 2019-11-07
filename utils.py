@@ -3,6 +3,7 @@ import numpy as np
 from abr_control.controllers import OSC, Damping, RestingConfig
 from abr_control.controllers import path_planners, signals
 from abr_control.utils import transformations
+from abr_control.utils.transformations import quaternion_multiply, quaternion_inverse
 from nengolib.stats import ScatteredHypersphere
 
 import nengo
@@ -389,6 +390,91 @@ def scale_inputs(spherical, means, variances, input_signal):
         scaled_input = spherical_transform(scaled_input.reshape(1, len(scaled_input)))
 
     return scaled_input
+
+
+def calculate_rotQ():
+    theta1 = np.pi/2
+    xyz1 = np.array([0, 0, 1])
+    rot1_quat = transformations.quaternion_about_axis(theta1, xyz1)
+
+    theta2 = np.pi/2
+    xyz2 = np.array([0, 1, 0])
+    rot2_quat = transformations.quaternion_about_axis(theta2, xyz2)
+
+    theta3 = -np.pi/2
+    xyz3 = np.array([1, 0, 0])
+    rot3_quat = transformations.quaternion_about_axis(theta3, xyz3)
+
+    rotQ = quaternion_multiply(rot3_quat, quaternion_multiply(rot2_quat, rot1_quat))
+
+    return rotQ
+
+
+def calculate_reach_params(reach, reach_mode, final_xyz, interface, robot_config):
+    feedback = interface.get_feedback()
+
+    # if we're reaching to target, update with user changes
+    if reach_mode == 'reach_target':
+        reach['target_pos'] = final_xyz
+
+    # print('Next reach')
+    if reach['target_options'] == 'object':
+
+        reach['target_pos'] = interface.get_xyz('handle', object_type='geom')
+
+        # target orientation should be that of an object in the environment
+        objQ = interface.get_orientation('handle', object_type='geom')
+        rotQ = calculate_rotQ()
+        quat = quaternion_multiply(rotQ, objQ)
+        startQ = np.copy(quat)
+        reach['orientation'] = quat
+
+    elif reach['target_options'] == 'shifted':
+        # account for the object in the hand having slipped / rotated
+        rotQ = calculate_rotQ()
+
+        # get xyz of the hand
+        hand_xyz = interface.get_xyz('EE', object_type='body')
+        # get xyz of the object
+        object_xyz = interface.get_xyz('handle', object_type='geom')
+
+        reach['target'] = object_xyz + (object_xyz - hand_xyz)
+
+        # get current orientation of hand
+        handQ_prime = interface.get_orientation('EE', object_type='body')
+        # get current orientation of object
+        objQ_prime = interface.get_orientation('handle', object_type='geom')
+
+        # get the difference between hand and object
+        rotQ_prime = quaternion_multiply(handQ_prime, quaternion_inverse(objQ_prime))
+        # compare with difference at start of movement
+        dQ = quaternion_multiply(rotQ_prime, quaternion_inverse(rotQ))
+        # transform the original target by the difference
+        shiftedQ = quaternion_multiply(startQ, dQ)
+
+        reach['orientation'] = shiftedQ
+
+    elif reach['target_options'] == 'shifted2':
+        reach['orientation'] = shiftedQ
+
+    # calculate our position and orientation path planners, with their
+    # corresponding approach
+    traj_planner, orientation_planner, target_data = get_approach_path(
+        robot_config=robot_config,
+        path_planner=reach['traj_planner'](reach['n_timesteps']),
+        q=feedback['q'],
+        target_pos=reach['target_pos'],
+        target_orientation=reach['orientation'],
+        start_pos=reach['start_pos'],
+        max_reach_dist=None,
+        min_z=0.0,
+        approach_buffer=reach['approach_buffer'],
+        offset=reach['offset'],
+        z_rot=reach['z_rot'],
+        rot_wrist=reach['rot_wrist'])
+
+    return reach, traj_planner, orientation_planner, target_data
+
 
 
 def get_weights(sim, conn_learn):
