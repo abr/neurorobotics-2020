@@ -310,7 +310,7 @@ def first_order_arc(n_timesteps):
 #     return traj_planner
 
 
-def target_shift(interface, base_location, scale=0.01, xlim=None, ylim=None, zlim=None):
+def target_shift(interface, base_location, scale=0.01, xlim=None, ylim=None, zlim=None, rlim=None):
     """
     Gets the user input from the mujoco_viewer to shift the target and returns the
     base_location with the shift*scale. The final target is clipped along x, y, z
@@ -323,12 +323,14 @@ def target_shift(interface, base_location, scale=0.01, xlim=None, ylim=None, zli
         the current target to be shifted [meters]
     scale: float, optional (Default: 0.01)
         the amount to move with each button press [meters]
-    xlim: list of 2 floats, Optional (Default: -1, 1)
+    xlim: array of 2 floats, Optional (Default: -1, 1)
         the minimum and maximum allowable values [meters]
-    ylim: list of 2 floats, Optional (Default: -1, 1)
+    ylim: array of 2 floats, Optional (Default: -1, 1)
         the minimum and maximum allowable values [meters]
-    zlim: list of 2 floats, Optional (Default: 0, 1)
+    zlim: array of 2 floats, Optional (Default: 0, 1)
         the minimum and maximum allowable values [meters]
+    rlim: array of 2 float, Optional (Default: [None, None])
+        the minimum and maxium radius from the arm origin to allow targets
     """
     if xlim is None:
         xlim = [-1, 1]
@@ -336,6 +338,8 @@ def target_shift(interface, base_location, scale=0.01, xlim=None, ylim=None, zli
         ylim = [-1, 1]
     if zlim is None:
         zlim = [0, 1]
+    if rlim is None:
+        rlim = [None, None]
 
     def clip(val, minimum, maximum):
         val = max(val, minimum)
@@ -349,6 +353,16 @@ def target_shift(interface, base_location, scale=0.01, xlim=None, ylim=None, zli
             interface.viewer.target_z,
         ]
     )
+
+    # check that we're within radius thresholds, if set
+    if rlim[0] is not None:
+        if np.linalg.norm(shifted_target) < rlim[0]:
+            return base_location
+
+    if rlim[1] is not None:
+        if np.linalg.norm(shifted_target) > rlim[1]:
+            return base_location
+
     shifted_target = np.array(
         [
             clip(shifted_target[0], xlim[0], xlim[1]),

@@ -1,6 +1,6 @@
 import nengo
 
-# import nengo_loihi
+import nengo_loihi
 import numpy as np
 import timeit
 import traceback
@@ -95,6 +95,7 @@ scale = 0.05
 xlim = [-0.5, 0.5]
 ylim = [-0.5, 0.5]
 zlim = [0.0, 0.7]
+rlim = [0.15, 1.0]
 
 
 def clip(val, minimum, maximum):
@@ -179,6 +180,15 @@ with net:
         )
         if not np.allclose(change, 0):
             net.final_xyz = net.final_xyz + scale * change
+            # check that we're within radius thresholds, if set
+            if rlim[0] is not None:
+                if np.linalg.norm(net.final_xyz) < rlim[0]:
+                    net.final_xyz = net.old_final_xyz
+
+            if rlim[1] is not None:
+                if np.linalg.norm(net.final_xyz) > rlim[1]:
+                    net.final_xyz = net.old_final_xyz
+
             net.final_xyz = np.array(
                 [
                     clip(net.final_xyz[0], xlim[0], xlim[1]),
@@ -393,14 +403,14 @@ with net:
         nengo.Connection(arm[n_input:], conn_learn[ii].learning_rule, synapse=None)
 
 try:
-    # with nengo_loihi.Simulator(
-    #         net,
-    #         target='loihi',
-    #         hardware_options=dict(snip_max_spikes_per_step=300)) as sim:
-    with nengo.Simulator(net) as sim:
+    with nengo_loihi.Simulator(
+            net,
+            target='loihi',
+            hardware_options=dict(snip_max_spikes_per_step=300)) as sim:
+    #with nengo.Simulator(net) as sim:
         sim.run(0.01)
         start = timeit.default_timer()
-        sim.run(20)
+        sim.run(30)
         print("Run time: %0.5f" % (timeit.default_timer() - start))
         print("timers: ", sim.timers["snips"])
 finally:
