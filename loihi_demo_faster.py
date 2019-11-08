@@ -166,14 +166,76 @@ with net:
                 net.reach = reach_list[net.reach_mode][net.reach_index]
                 net.u_gripper_prev = np.zeros(3)
 
-                (
-                    net.reach,
-                    net.trajectory_planner,
-                    net.orientation_planner,
-                    net.target_data,
-                ) = calculate_reach_params(
-                    net.reach, net.reach_mode, net.final_xyz, interface, robot_config
-                )
+                # (
+                #     net.reach,
+                #     net.trajectory_planner,
+                #     net.orientation_planner,
+                #     net.target_data,
+                # ) = calculate_reach_params(
+                #     net.reach, net.reach_mode, net.final_xyz, interface, robot_config
+                # )
+
+                feedback = interface.get_feedback()
+
+                # if we're reaching to target, update with user changes
+                if net.reach_mode == 'reach_target':
+                    net.reach['target_pos'] = net.final_xyz
+
+                # print('Next reach')
+                if net.reach['target_options'] == 'object':
+
+                    net.reach['target_pos'] = interface.get_xyz('handle', object_type='geom')
+
+                    # target orientation should be that of an object in the environment
+                    objQ = interface.get_orientation('handle', object_type='geom')
+                    rotQ = calculate_rotQ()
+                    quat = quaternion_multiply(rotQ, objQ)
+                    startQ = np.copy(quat)
+                    net.reach['orientation'] = quat
+
+                elif net.reach['target_options'] == 'shifted':
+                    # account for the object in the hand having slipped / rotated
+                    rotQ = calculate_rotQ()
+
+                    # get xyz of the hand
+                    hand_xyz = interface.get_xyz('EE', object_type='body')
+                    # get xyz of the object
+                    object_xyz = interface.get_xyz('handle', object_type='geom')
+
+                    net.reach['target'] = object_xyz + (object_xyz - hand_xyz)
+
+                    # get current orientation of hand
+                    handQ_prime = interface.get_orientation('EE', object_type='body')
+                    # get current orientation of object
+                    objQ_prime = interface.get_orientation('handle', object_type='geom')
+
+                    # get the difference between hand and object
+                    rotQ_prime = quaternion_multiply(handQ_prime, quaternion_inverse(objQ_prime))
+                    # compare with difference at start of movement
+                    dQ = quaternion_multiply(rotQ_prime, quaternion_inverse(rotQ))
+                    # transform the original target by the difference
+                    shiftedQ = quaternion_multiply(startQ, dQ)
+
+                    net.reach['orientation'] = net.shiftedQ
+
+                elif net.reach['target_options'] == 'shifted2':
+                    net.reach['orientation'] = net.shiftedQ
+
+                # calculate our position and orientation path planners, with their
+                # corresponding approach
+                net.trajectory_planner, net.orientation_planner, net.target_data = get_approach_path(
+                    robot_config=robot_config,
+                    path_planner=net.reach['traj_planner'](net.reach['n_timesteps']),
+                    q=feedback['q'],
+                    target_pos=net.reach['target_pos'],
+                    target_orientation=net.reach['orientation'],
+                    start_pos=net.reach['start_pos'],
+                    max_reach_dist=None,
+                    min_z=0.0,
+                    approach_buffer=net.reach['approach_buffer'],
+                    offset=net.reach['offset'],
+                    z_rot=net.reach['z_rot'],
+                    rot_wrist=net.reach['rot_wrist'])
 
                 net.next_reach = False
                 net.count = 0
