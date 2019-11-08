@@ -1,6 +1,6 @@
 import numpy as np
 
-from utils import osc6dof, osc3dof, second_order_path_planner, first_order_arc
+from utils import osc6dof, osc3dof, second_order_path_planner, first_order_arc, first_order_arc_dmp
 
 def gen_reach_list(robot_config, object_xyz, deposit_xyz):
 
@@ -100,7 +100,8 @@ def gen_reach_list(robot_config, object_xyz, deposit_xyz):
             'ctrlr': osc3dof(robot_config, rest_angles),
             'offset': np.array([0, 0, 0]),
             'approach_buffer': 0,
-            'traj_planner': second_order_path_planner,
+            #'traj_planner': second_order_path_planner,
+            'traj_planner': first_order_arc,
             'z_rot': np.pi/2,
             'rot_wrist': False,
             'target_options': None,

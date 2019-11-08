@@ -301,13 +301,9 @@ def first_order_arc(n_timesteps):
     return traj_planner
 
 
-# def arc_path_planner(n_timesteps=2000, **kwargs):
-#     """
-#     Define your path planner of choice here
-#     """
-#
-#     traj_planner = path_planners.FirstOrderArc(n_timesteps=n_timesteps)
-#     return traj_planner
+def first_order_arc_dmp(n_timesteps, error_scale=1):
+    traj_planner = path_planners.FirstOrderArcDMP(n_timesteps, error_scale)
+    return traj_planner
 
 
 def target_shift(interface, base_location, scale=0.01, xlim=None, ylim=None, zlim=None, rlim=None):

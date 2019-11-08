@@ -1,4 +1,5 @@
 import nengo
+import sys
 
 import nengo_loihi
 import numpy as np
@@ -24,10 +25,17 @@ from utils import (
     target_shift,
     adapt,
     first_order_arc,
+    first_order_arc_dmp,
     calculate_reach_params,
 )
 
 from reach_list import gen_reach_list
+
+if len(sys.argv) > 1:
+    backend = str(sys.argv[1])
+else:
+    backend = 'loihi'
+print('Using %s as backend' % backend)
 
 rng = np.random.RandomState(9)
 
@@ -35,8 +43,8 @@ n_input = 10
 n_output = 5
 
 n_neurons = 1000
-n_ensembles = 1
-pes_learning_rate = 5e-5
+n_ensembles = 10
+pes_learning_rate = 3e-4
 seed = 0
 spherical = True  # project the input onto the surface of a D+1 hypersphere
 if spherical:
@@ -74,7 +82,7 @@ encoders = encoders_dist.sample(n_neurons * n_ensembles, n_input, rng=rng)
 encoders = encoders.reshape(n_ensembles, n_neurons, n_input)
 
 # initialize our robot config for the jaco2
-robot_config = arm("jaco2_gripper")
+robot_config = arm("jaco2_gripper", use_sim_state=True)
 
 # create our Mujoco interface
 interface = Mujoco(robot_config, dt=0.001, visualize=True)
@@ -215,11 +223,15 @@ with net:
             else:
                 if not np.allclose(net.final_xyz, net.old_final_xyz, atol=1e-5):
                     # if the target has moved, regenerate the path planner
-                    net.trajectory_planner.reset(
-                        position=net.pos,
-                        target_pos=(net.final_xyz + net.reach["offset"]),
-                    )
-                net.pos, net.vel = net.trajectory_planner._step(error=error)
+                    # net.trajectory_planner.reset(
+                    #     position=net.pos,
+                    #     target_pos=(net.final_xyz + net.reach["offset"]),
+                    # )
+                    net.n_timesteps = net.reach['n_timesteps'] - net.count
+                    net.trajectory_planner.generate_path(
+                        position=net.pos, target_pos=net.final_xyz + net.reach['offset'])
+                # net.pos, net.vel = net.trajectory_planner._step(error=error)
+                net.pos, net.vel = net.trajectory_planner.next()
             orient = np.zeros(3)
 
         else:
@@ -403,15 +415,22 @@ with net:
         nengo.Connection(arm[n_input:], conn_learn[ii].learning_rule, synapse=None)
 
 try:
-    with nengo_loihi.Simulator(
-            net,
-            target='loihi',
-            hardware_options=dict(snip_max_spikes_per_step=300)) as sim:
-    #with nengo.Simulator(net) as sim:
-        sim.run(0.01)
-        start = timeit.default_timer()
-        sim.run(30)
-        print("Run time: %0.5f" % (timeit.default_timer() - start))
-        print("timers: ", sim.timers["snips"])
+    if backend=='loihi':
+        with nengo_loihi.Simulator(
+                net,
+                target='loihi',
+                hardware_options=dict(snip_max_spikes_per_step=300)) as sim:
+            sim.run(0.01)
+            start = timeit.default_timer()
+            sim.run(50)
+            print("Run time: %0.5f" % (timeit.default_timer() - start))
+            print("timers: ", sim.timers["snips"])
+    elif backend=='cpu':
+        with nengo.Simulator(net) as sim:
+            sim.run(0.01)
+            start = timeit.default_timer()
+            sim.run(50)
+            print("Run time: %0.5f" % (timeit.default_timer() - start))
+            #print("timers: ", sim.timers["snips"])
 finally:
     interface.disconnect()
