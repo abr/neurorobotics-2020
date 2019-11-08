@@ -44,14 +44,17 @@ n_output = 5
 
 n_neurons = 1000
 n_ensembles = 10
-pes_learning_rate = 3e-4
+# pes_learning_rate = 1e-4
+pes_learning_rate = 3e-5
 seed = 0
 spherical = True  # project the input onto the surface of a D+1 hypersphere
 if spherical:
     n_input += 1
 
-means = ([0.12, 2.14, 1.87, 4.32, 0.59, 0.12, -0.38, -0.42, -0.29, 0.36],)
-variances = ([0.08, 0.6, 0.7, 0.3, 0.6, 0.08, 1.4, 1.6, 0.7, 1.2],)
+# means = ([0.12, 2.14, 1.87, 4.32, 0.59, 0.12, -0.38, -0.42, -0.29, 0.36],)
+means = np.zeros(10)
+# variances = ([0.08, 0.6, 0.7, 0.3, 0.6, 0.08, 1.4, 1.6, 0.7, 1.2],)
+variances = np.hstack((np.ones(5)*6.28, np.ones(5)*1.25))
 
 # synapse time constants
 tau_input = 0.012  # on input connection
@@ -62,8 +65,8 @@ tau_output = 0.012  # on the output from the adaptive ensemble
 # pre_synapse parameter inside the PES rule instantiation
 
 # set up neuron intercepts
-intercepts_bounds = [-0.3, 0.1]
-intercepts_mode = 0.1
+intercepts_bounds = [-0.7, -0.4]
+intercepts_mode = -0.5
 
 intercepts_dist = AreaIntercepts(
     dimensions=n_input,
@@ -103,7 +106,7 @@ scale = 0.05
 xlim = [-0.5, 0.5]
 ylim = [-0.5, 0.5]
 zlim = [0.0, 0.7]
-rlim = [0.15, 1.0]
+rlim = [0.35, 1.0]
 
 
 def clip(val, minimum, maximum):
@@ -259,6 +262,7 @@ with net:
         if net.adapt:
             # adaptive signal added (no signal for last joint)
             net.u[:robot_config.N_JOINTS - 1] += u_adapt
+            # print('u_adapt: ', u_adapt)
 
         # get our gripper command -----------------------------------------------------
         finger_q = np.array(
@@ -284,6 +288,10 @@ with net:
         u_gripper = np.clip(u_gripper, a_max=max_grip, a_min=-max_grip)
         net.u_gripper_prev[:] = np.copy(u_gripper)
         net.u[robot_config.N_JOINTS:] = u_gripper * interface.viewer.gripper
+
+        # apply any external forces
+        interface.set_external_force(
+            'EE', np.array([0, 0, -9.81, 0, 0, 0]) * interface.viewer.external_force)
 
         # send to mujoco, stepping the sim forward
         interface.send_forces(net.u)
