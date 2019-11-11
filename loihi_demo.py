@@ -31,8 +31,6 @@ from utils import (
     first_order_arc,
     first_order_arc_dmp,
     calculate_rotQ,
-    quaternion_multiply,
-    quaternion_inverse
 )
 
 from reach_list import gen_reach_list
@@ -50,7 +48,6 @@ n_output = 5
 
 n_neurons = 1000
 n_ensembles = 10
-# pes_learning_rate = 1e-4
 pes_learning_rate = 3e-5
 seed = 0
 spherical = True  # project the input onto the surface of a D+1 hypersphere
@@ -71,6 +68,8 @@ tau_output = 0.012  # on the output from the adaptive ensemble
 # pre_synapse parameter inside the PES rule instantiation
 
 # set up neuron intercepts
+# intercepts_bounds = [-0.3, 0.1]
+# intercepts_mode = 0.1
 intercepts_bounds = [-0.7, -0.4]
 intercepts_mode = -0.5
 
@@ -112,7 +111,7 @@ scale = 0.05
 xlim = [-0.5, 0.5]
 ylim = [-0.5, 0.5]
 zlim = [0.0, 0.7]
-rlim = [0.35, 1.0]
+rlim = [0.4, 1.0]
 
 
 def clip(val, minimum, maximum):
@@ -143,7 +142,6 @@ with net:
     net.next_reach = False
     net.reach = None
     net.u_gripper_prev = np.zeros(3)
-    net.adapt = False  # start out with adaptation off
     net.path_vis = False  # start out not displaying path planner target
     net.u = np.zeros(robot_config.N_JOINTS + 3)
 
@@ -152,268 +150,275 @@ with net:
     interface.set_mocap_xyz(name="target", xyz=net.final_xyz)
 
     def arm_func(t, u_adapt):
-        net.reach_mode = interface.viewer.reach_mode
 
-        if net.reach_mode != net.old_reach_mode:
-            print("Reach mode changed")
-            net.next_reach = True
-            net.old_reach_mode = net.reach_mode
-            net.reach_index = -1
+        ran_at_least_once = False
+        while not ran_at_least_once or not interface.viewer.adapt:
+            ran_at_least_once = True
+            net.reach_mode = interface.viewer.reach_mode
 
-        # if the reaching mode has changed, recalculate reaching parameters -----------
-        if net.next_reach:
-            print("Generating next reach")
-            net.reach_index += 1
-            if net.reach_index >= len(reach_list[net.reach_mode]):
-                interface.viewer.reach_mode = "reach_target"
-                net.reach_mode = interface.viewer.reach_mode
-                net.reach_index = 0
+            if net.reach_mode != net.old_reach_mode:
+                print("Reach mode changed")
+                net.next_reach = True
+                net.old_reach_mode = net.reach_mode
+                net.reach_index = -1
 
-            net.reach = reach_list[net.reach_mode][net.reach_index]
-            net.u_gripper_prev = np.zeros(3)
+            # if the reaching mode has changed, recalculate reaching parameters -----------
+            if net.next_reach:
+                print("Generating next reach")
+                net.reach_index += 1
+                if net.reach_index >= len(reach_list[net.reach_mode]):
+                    interface.viewer.reach_mode = "reach_target"
+                    net.reach_mode = interface.viewer.reach_mode
+                    net.reach_index = 0
 
-            feedback = interface.get_feedback()
+                net.reach = reach_list[net.reach_mode][net.reach_index]
+                net.u_gripper_prev = np.zeros(3)
 
-            # if we're reaching to target, update with user changes
-            if net.reach_mode == 'reach_target':
-                net.reach['target_pos'] = net.final_xyz
+                # (
+                #     net.reach,
+                #     net.trajectory_planner,
+                #     net.orientation_planner,
+                #     net.target_data,
+                # ) = calculate_reach_params(
+                #     net.reach, net.reach_mode, net.final_xyz, interface, robot_config
+                # )
 
-            # print('Next reach')
-            if net.reach['target_options'] == 'object':
+                feedback = interface.get_feedback()
 
-                net.reach['target_pos'] = interface.get_xyz('handle', object_type='geom')
+                # if we're reaching to target, update with user changes
+                if net.reach_mode == 'reach_target':
+                    net.reach['target_pos'] = net.final_xyz
 
-                # target orientation should be that of an object in the environment
-                objQ = interface.get_orientation('handle', object_type='geom')
-                rotQ = calculate_rotQ()
-                quat = quaternion_multiply(rotQ, objQ)
-                startQ = np.copy(quat)
-                net.reach['orientation'] = quat
+                # print('Next reach')
+                if net.reach['target_options'] == 'object':
 
-            elif net.reach['target_options'] == 'shifted':
-                # account for the object in the hand having slipped / rotated
-                rotQ = calculate_rotQ()
+                    net.reach['target_pos'] = interface.get_xyz('handle', object_type='geom')
 
-                # get xyz of the hand
-                hand_xyz = interface.get_xyz('EE', object_type='body')
-                # get xyz of the object
-                object_xyz = interface.get_xyz('handle', object_type='geom')
+                    # target orientation should be that of an object in the environment
+                    objQ = interface.get_orientation('handle', object_type='geom')
+                    net.rotQ = calculate_rotQ()
+                    quat = quaternion_multiply(net.rotQ, objQ)
+                    net.startQ = np.copy(quat)
+                    net.reach['orientation'] = quat
 
-                net.reach['target'] = object_xyz + (object_xyz - hand_xyz)
+                elif net.reach['target_options'] == 'shifted':
+                    # account for the object in the hand having slipped / rotated
+                    net.rotQ = calculate_rotQ()
 
-                # get current orientation of hand
-                handQ_prime = interface.get_orientation('EE', object_type='body')
-                # get current orientation of object
-                objQ_prime = interface.get_orientation('handle', object_type='geom')
+                    # get xyz of the hand
+                    hand_xyz = interface.get_xyz('EE', object_type='body')
+                    # get xyz of the object
+                    object_xyz = interface.get_xyz('handle', object_type='geom')
 
-                # get the difference between hand and object
-                rotQ_prime = quaternion_multiply(handQ_prime, quaternion_inverse(objQ_prime))
-                # compare with difference at start of movement
-                dQ = quaternion_multiply(rotQ_prime, quaternion_inverse(rotQ))
-                # transform the original target by the difference
-                shiftedQ = quaternion_multiply(startQ, dQ)
+                    net.reach['target'] = object_xyz + (object_xyz - hand_xyz)
 
-                net.reach['orientation'] = net.shiftedQ
+                    # get current orientation of hand
+                    handQ_prime = interface.get_orientation('EE', object_type='body')
+                    # get current orientation of object
+                    objQ_prime = interface.get_orientation('handle', object_type='geom')
 
-            elif net.reach['target_options'] == 'shifted2':
-                net.reach['orientation'] = net.shiftedQ
+                    # get the difference between hand and object
+                    rotQ_prime = quaternion_multiply(handQ_prime, quaternion_inverse(objQ_prime))
+                    # compare with difference at start of movement
+                    dQ = quaternion_multiply(rotQ_prime, quaternion_inverse(net.rotQ))
+                    # transform the original target by the difference
+                    net.shiftedQ = quaternion_multiply(net.startQ, dQ)
 
-            # calculate our position and orientation path planners, with their
-            # corresponding approach
-            net.trajectory_planner, net.orientation_planner, net.target_data = get_approach_path(
-                robot_config=robot_config,
-                path_planner=net.reach['traj_planner'](net.reach['n_timesteps']),
-                q=feedback['q'],
-                target_pos=net.reach['target_pos'],
-                target_orientation=net.reach['orientation'],
-                start_pos=net.reach['start_pos'],
-                max_reach_dist=None,
-                min_z=0.0,
-                approach_buffer=net.reach['approach_buffer'],
-                offset=net.reach['offset'],
-                z_rot=net.reach['z_rot'],
-                rot_wrist=net.reach['rot_wrist'])
+                    net.reach['orientation'] = net.shiftedQ
 
+                elif net.reach['target_options'] == 'shifted2':
+                    net.reach['orientation'] = net.shiftedQ
 
-            net.next_reach = False
-            net.count = 0
+                # calculate our position and orientation path planners, with their
+                # corresponding approach
+                net.trajectory_planner, net.orientation_planner, net.target_data = get_approach_path(
+                    robot_config=robot_config,
+                    path_planner=net.reach['traj_planner'](net.reach['n_timesteps']),
+                    q=feedback['q'],
+                    target_pos=net.reach['target_pos'],
+                    target_orientation=net.reach['orientation'],
+                    start_pos=net.reach['start_pos'],
+                    max_reach_dist=None,
+                    min_z=0.0,
+                    approach_buffer=net.reach['approach_buffer'],
+                    offset=net.reach['offset'],
+                    z_rot=net.reach['z_rot'],
+                    rot_wrist=net.reach['rot_wrist'])
 
-        # get the target location from the interface
-        net.old_final_xyz = net.final_xyz
+                net.next_reach = False
+                net.count = 0
 
-        # check if the user moved the target ------------------------------------------
-        change = np.array(
-            [
-                interface.viewer.target_x,
-                interface.viewer.target_y,
-                interface.viewer.target_z,
-            ]
-        )
-        if not np.allclose(change, 0):
-            net.final_xyz = net.final_xyz + scale * change
-            # check that we're within radius thresholds, if set
-            if rlim[0] is not None:
-                if np.linalg.norm(net.final_xyz) < rlim[0]:
-                    net.final_xyz = net.old_final_xyz
+            # get the target location from the interface
+            net.old_final_xyz = net.final_xyz
 
-            if rlim[1] is not None:
-                if np.linalg.norm(net.final_xyz) > rlim[1]:
-                    net.final_xyz = net.old_final_xyz
-
-            net.final_xyz = np.array(
+            # check if the user moved the target ------------------------------------------
+            change = np.array(
                 [
-                    clip(net.final_xyz[0], xlim[0], xlim[1]),
-                    clip(net.final_xyz[1], ylim[0], ylim[1]),
-                    clip(net.final_xyz[2], zlim[0], zlim[1]),
+                    interface.viewer.target_x,
+                    interface.viewer.target_y,
+                    interface.viewer.target_z,
                 ]
             )
-            interface.viewer.target_x = 0
-            interface.viewer.target_y = 0
-            interface.viewer.target_z = 0
-            # update visualization of target
-            interface.set_mocap_xyz("target", net.final_xyz)
+            if not np.allclose(change, 0):
+                net.final_xyz = net.final_xyz + scale * change
+                # check that we're within radius thresholds, if set
+                if rlim[0] is not None:
+                    if np.linalg.norm(net.final_xyz) < rlim[0]:
+                        net.final_xyz = net.old_final_xyz
 
-        # get arm feedback
-        feedback = interface.get_feedback()
-        hand_xyz = robot_config.Tx("EE", feedback["q"])
+                if rlim[1] is not None:
+                    if np.linalg.norm(net.final_xyz) > rlim[1]:
+                        net.final_xyz = net.old_final_xyz
 
-        # update our path planner position and orientation ----------------------------
-        if net.reach_mode == "reach_target":
-            error = np.linalg.norm(hand_xyz - net.final_xyz + net.reach["offset"])
-            if error < 0.05:  # when close enough, don't use path planner
-                net.pos = net.final_xyz + net.reach["offset"]
-                net.vel = np.zeros(3)
+                net.final_xyz = np.array(
+                    [
+                        clip(net.final_xyz[0], xlim[0], xlim[1]),
+                        clip(net.final_xyz[1], ylim[0], ylim[1]),
+                        clip(net.final_xyz[2], zlim[0], zlim[1]),
+                    ]
+                )
+                interface.viewer.target_x = 0
+                interface.viewer.target_y = 0
+                interface.viewer.target_z = 0
+                # update visualization of target
+                interface.set_mocap_xyz("target", net.final_xyz)
+
+            # get arm feedback
+            feedback = interface.get_feedback()
+            hand_xyz = robot_config.Tx("EE", feedback["q"])
+
+            # update our path planner position and orientation ----------------------------
+            if net.reach_mode == "reach_target":
+                error = np.linalg.norm(hand_xyz - net.final_xyz + net.reach["offset"])
+                if error < 0.05:  # when close enough, don't use path planner
+                    net.pos = net.final_xyz + net.reach["offset"]
+                    net.vel = np.zeros(3)
+                else:
+                    if not np.allclose(net.final_xyz, net.old_final_xyz, atol=1e-5):
+                        # if the target has moved, regenerate the path planner
+                        # net.trajectory_planner.reset(
+                        #     position=net.pos,
+                        #     target_pos=(net.final_xyz + net.reach["offset"]),
+                        # )
+                        net.n_timesteps = net.reach['n_timesteps'] - net.count
+                        net.trajectory_planner.generate_path(
+                            position=net.pos, target_pos=net.final_xyz + net.reach['offset'])
+                    # net.pos, net.vel = net.trajectory_planner._step(error=error)
+                    net.pos, net.vel = net.trajectory_planner.next()
+                orient = np.zeros(3)
+
             else:
-                if not np.allclose(net.final_xyz, net.old_final_xyz, atol=1e-5):
-                    # if the target has moved, regenerate the path planner
-                    # net.trajectory_planner.reset(
-                    #     position=net.pos,
-                    #     target_pos=(net.final_xyz + net.reach["offset"]),
-                    # )
-                    net.n_timesteps = net.reach['n_timesteps'] - net.count
-                    net.trajectory_planner.generate_path(
-                        position=net.pos, target_pos=net.final_xyz + net.reach['offset'])
-                # net.pos, net.vel = net.trajectory_planner._step(error=error)
+                error = np.linalg.norm((hand_xyz - net.target_data["approach_pos"]))
                 net.pos, net.vel = net.trajectory_planner.next()
-            orient = np.zeros(3)
+                orient = net.orientation_planner.next()
 
-        else:
-            error = np.linalg.norm((hand_xyz - net.target_data["approach_pos"]))
-            net.pos, net.vel = net.trajectory_planner.next()
-            orient = net.orientation_planner.next()
+            target = np.hstack([net.pos, orient])
 
-        target = np.hstack([net.pos, orient])
+            # calculate our osc control signal --------------------------------------------
+            net.u[:robot_config.N_JOINTS] = net.reach["ctrlr"].generate(
+                q=feedback["q"], dq=feedback["dq"], target=target
+            )
 
-        # calculate our osc control signal -------------------------------------------- 
-        net.u[:robot_config.N_JOINTS] = net.reach["ctrlr"].generate(
-            q=feedback["q"], dq=feedback["dq"], target=target
-        )
-
-        # if the adaptation state is toggled ------------------------------------------
-        if net.adapt != interface.viewer.adapt:
             if interface.viewer.adapt:
-                interface.set_mocap_xyz("adapt_on", adapt_text)
-                interface.set_mocap_xyz("adapt_off", [0, 0, -1])
-            else:
-                interface.set_mocap_xyz("adapt_off", adapt_text)
-                interface.set_mocap_xyz("adapt_on", [0, 0, -1])
-            net.adapt = interface.viewer.adapt
+                # adaptive signal added (no signal for last joint)
+                net.u[:robot_config.N_JOINTS - 1] += u_adapt
 
-        if net.adapt:
-            # adaptive signal added (no signal for last joint)
-            net.u[:robot_config.N_JOINTS - 1] += u_adapt
-            # print('u_adapt: ', u_adapt)
+            # get our gripper command -----------------------------------------------------
+            finger_q = np.array(
+                [
+                    interface.sim.data.qpos[interface.sim.model.get_joint_qpos_addr(finger)]
+                    for finger in fingers
+                ]
+            )
+            finger_dq = np.array(
+                [
+                    interface.sim.data.qvel[interface.sim.model.get_joint_qpos_addr(finger)]
+                    for finger in fingers
+                ]
+            )
 
-        # get our gripper command -----------------------------------------------------
-        finger_q = np.array(
-            [
-                interface.sim.data.qpos[interface.sim.model.get_joint_qpos_addr(finger)]
-                for finger in fingers
-            ]
-        )
-        finger_dq = np.array(
-            [
-                interface.sim.data.qvel[interface.sim.model.get_joint_qpos_addr(finger)]
-                for finger in fingers
-            ]
-        )
+            # NOTE interface lets you toggle gripper status with the 'n' key
+            # TODO remove the interface gripper control for actual demo
+            u_gripper = fkp * (net.reach["grasp_pos"] - finger_q) - fkv * finger_dq
+            u_gripper = (
+                net.reach["f_alpha"] * u_gripper
+                + (1 - net.reach["f_alpha"]) * net.u_gripper_prev
+            )
+            u_gripper = np.clip(u_gripper, a_max=max_grip, a_min=-max_grip)
+            net.u_gripper_prev[:] = np.copy(u_gripper)
+            net.u[robot_config.N_JOINTS:] = u_gripper * interface.viewer.gripper
 
-        # NOTE interface lets you toggle gripper status with the 'n' key
-        # TODO remove the interface gripper control for actual demo
-        u_gripper = fkp * (net.reach["grasp_pos"] - finger_q) - fkv * finger_dq
-        u_gripper = (
-            net.reach["f_alpha"] * u_gripper
-            + (1 - net.reach["f_alpha"]) * net.u_gripper_prev
-        )
-        u_gripper = np.clip(u_gripper, a_max=max_grip, a_min=-max_grip)
-        net.u_gripper_prev[:] = np.copy(u_gripper)
-        net.u[robot_config.N_JOINTS:] = u_gripper * interface.viewer.gripper
+            # apply any external forces
+            interface.set_external_force(
+                'EE', np.array([0, 0, -9.81, 0, 0, 0]) * interface.viewer.external_force)
 
-        # apply any external forces
-        interface.set_external_force(
-            'EE', np.array([0, 0, -9.81, 0, 0, 0]) * interface.viewer.external_force)
+            # send to mujoco, stepping the sim forward
+            interface.send_forces(net.u)
 
-        # send to mujoco, stepping the sim forward
-        interface.send_forces(net.u)
-
-        # ----------------
-        if net.reach_mode == "reach_target":
-            if error < net.reach["error_thresh"]:
-                interface.sim.model.geom_rgba[target_geom_id] = green
+            # ----------------
+            if net.reach_mode == "reach_target":
+                if error < net.reach["error_thresh"]:
+                    interface.sim.model.geom_rgba[target_geom_id] = green
+                else:
+                    interface.sim.model.geom_rgba[target_geom_id] = red
             else:
                 interface.sim.model.geom_rgba[target_geom_id] = red
-        else:
-            interface.sim.model.geom_rgba[target_geom_id] = red
 
-            # the reason we differentiate hold and n timesteps is that hold is how
-            # long we want to wait to allow for the action, mainly used for grasping,
-            # whereas n_timesteps determines the number of steps in the path planner.
-            # we check n_timesteps*2 to allow the arm to catch up to the path planner
+                # the reason we differentiate hold and n timesteps is that hold is how
+                # long we want to wait to allow for the action, mainly used for grasping,
+                # whereas n_timesteps determines the number of steps in the path planner.
+                # we check n_timesteps*2 to allow the arm to catch up to the path planner
 
-            if net.reach["hold_timesteps"] is not None:
-                if net.count >= net.reach["hold_timesteps"]:
+                if net.reach["hold_timesteps"] is not None:
+                    if net.count >= net.reach["hold_timesteps"]:
+                        net.next_reach = True
+                elif net.count > net.reach["n_timesteps"] * 2 and error < 0.07:
                     net.next_reach = True
-            elif net.count > net.reach["n_timesteps"] * 2 and error < 0.07:
-                net.next_reach = True
 
-        net.count += 1
+            net.count += 1
 
-        # toggle the path planner visualization ---------------------------------------
-        if net.path_vis or net.path_vis != interface.viewer.path_vis:
-            if interface.viewer.path_vis:
-                interface.set_mocap_xyz("path_planner_orientation", target[:3])
-                interface.set_mocap_orientation(
-                    "path_planner_orientation",
-                    quaternion_from_euler(
-                        orient[0], orient[1], orient[2], "rxyz"
-                    ),
-                )
-            else:
-                interface.set_mocap_xyz(
-                    "path_planner_orientation", np.array([0, 0, -1])
-                )
-            net.path_vis = interface.viewer.path_vis
+            # toggle the path planner visualization ---------------------------------------
+            if net.path_vis or net.path_vis != interface.viewer.path_vis:
+                if interface.viewer.path_vis:
+                    interface.set_mocap_xyz("path_planner_orientation", target[:3])
+                    interface.set_mocap_orientation(
+                        "path_planner_orientation",
+                        quaternion_from_euler(
+                            orient[0], orient[1], orient[2], "rxyz"
+                        ),
+                    )
+                else:
+                    interface.set_mocap_xyz(
+                        "path_planner_orientation", np.array([0, 0, -1])
+                    )
+                net.path_vis = interface.viewer.path_vis
 
-        # print out information to mjviewer -------------------------------------------
-        interface.viewer.custom_print = "%s\nerror: %.3fm\nGripper toggle: %i" % (
-            net.reach["label"],
-            error,
-            interface.viewer.gripper,
-        )
+            # print out information to mjviewer -------------------------------------------
+            interface.viewer.custom_print = "%s\nerror: %.3fm\nGripper toggle: %i" % (
+                net.reach["label"],
+                error,
+                interface.viewer.gripper,
+            )
+
+            # check if the ADAPT sign should be on ------------------------------------
+            if not interface.viewer.adapt:
+                interface.set_mocap_xyz("adapt_off", adapt_text)
+                interface.set_mocap_xyz("adapt_on", [0, 0, -1])
+
+        # we made it out of the loop, so the adapt sign should be on! -----------------
+        interface.set_mocap_xyz("adapt_on", adapt_text)
+        interface.set_mocap_xyz("adapt_off", [0, 0, -1])
 
         # if adaptation is on, generate context signal for neural population ----------
-        if net.adapt:
-            feedback = interface.get_feedback()
-            context = scale_inputs(
-                spherical,
-                means,
-                variances,
-                np.hstack([feedback["q"][:5], feedback["dq"][:5]]),
-            )
-            training_signal = -net.reach['ctrlr'].training_signal[:5]
-            output_signal = np.hstack([context.flatten(), training_signal.flatten()])
-        else:
-            output_signal = OUTPUT_ZEROS
+        feedback = interface.get_feedback()
+        context = scale_inputs(
+            spherical,
+            means,
+            variances,
+            np.hstack([feedback["q"][:5], feedback["dq"][:5]]),
+        )
+        training_signal = -net.reach['ctrlr'].training_signal[:5]
+        output_signal = np.hstack([context.flatten(), training_signal.flatten()])
 
         # TODO: scale the training signal here
         return output_signal
