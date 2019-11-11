@@ -11,7 +11,11 @@ from nengo_loihi import decode_neurons
 from abr_control.controllers import OSC, Damping
 from abr_control.arms.mujoco_config import MujocoConfig as arm
 from abr_control.interfaces.mujoco import Mujoco
-from abr_control.utils import transformations
+from abr_control.utils.transformations import (
+    quaternion_multiply,
+    quaternion_inverse,
+    quaternion_from_euler
+)
 
 from utils import (
     AreaIntercepts,
@@ -26,6 +30,9 @@ from utils import (
     adapt,
     first_order_arc,
     first_order_arc_dmp,
+    calculate_rotQ,
+    quaternion_multiply,
+    quaternion_inverse
 )
 
 from reach_list import gen_reach_list
@@ -377,7 +384,7 @@ with net:
                 interface.set_mocap_xyz("path_planner_orientation", target[:3])
                 interface.set_mocap_orientation(
                     "path_planner_orientation",
-                    transformations.quaternion_from_euler(
+                    quaternion_from_euler(
                         orient[0], orient[1], orient[2], "rxyz"
                     ),
                 )
