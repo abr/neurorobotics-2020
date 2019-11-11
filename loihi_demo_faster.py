@@ -11,9 +11,11 @@ from nengo_loihi import decode_neurons
 from abr_control.controllers import OSC, Damping
 from abr_control.arms.mujoco_config import MujocoConfig as arm
 from abr_control.interfaces.mujoco import Mujoco
-from abr_control.utils import transformations
-
-from abr_control.utils.transformations import quaternion_multiply, quaternion_inverse
+from abr_control.utils.transformations import (
+    quaternion_multiply,
+    quaternion_inverse,
+    quaternion_from_euler
+)
 
 from utils import (
     AreaIntercepts,
@@ -52,8 +54,10 @@ spherical = True  # project the input onto the surface of a D+1 hypersphere
 if spherical:
     n_input += 1
 
-means = ([0.12, 2.14, 1.87, 4.32, 0.59, 0.12, -0.38, -0.42, -0.29, 0.36],)
-variances = ([0.08, 0.6, 0.7, 0.3, 0.6, 0.08, 1.4, 1.6, 0.7, 1.2],)
+# means = ([0.12, 2.14, 1.87, 4.32, 0.59, 0.12, -0.38, -0.42, -0.29, 0.36],)
+means = np.zeros(10)
+# variances = ([0.08, 0.6, 0.7, 0.3, 0.6, 0.08, 1.4, 1.6, 0.7, 1.2],)
+variances = np.hstack((np.ones(5)*6.28, np.ones(5)*1.25))
 
 # synapse time constants
 tau_input = 0.012  # on input connection
@@ -64,8 +68,10 @@ tau_output = 0.012  # on the output from the adaptive ensemble
 # pre_synapse parameter inside the PES rule instantiation
 
 # set up neuron intercepts
-intercepts_bounds = [-0.3, 0.1]
-intercepts_mode = 0.1
+# intercepts_bounds = [-0.3, 0.1]
+# intercepts_mode = 0.1
+intercepts_bounds = [-0.7, -0.4]
+intercepts_mode = -0.5
 
 intercepts_dist = AreaIntercepts(
     dimensions=n_input,
@@ -105,7 +111,7 @@ scale = 0.05
 xlim = [-0.5, 0.5]
 ylim = [-0.5, 0.5]
 zlim = [0.0, 0.7]
-rlim = [0.15, 1.0]
+rlim = [0.4, 1.0]
 
 
 def clip(val, minimum, maximum):
@@ -342,6 +348,10 @@ with net:
             net.u_gripper_prev[:] = np.copy(u_gripper)
             net.u[robot_config.N_JOINTS:] = u_gripper * interface.viewer.gripper
 
+            # apply any external forces
+            interface.set_external_force(
+                'EE', np.array([0, 0, -9.81, 0, 0, 0]) * interface.viewer.external_force)
+
             # send to mujoco, stepping the sim forward
             interface.send_forces(net.u)
 
@@ -373,7 +383,7 @@ with net:
                     interface.set_mocap_xyz("path_planner_orientation", target[:3])
                     interface.set_mocap_orientation(
                         "path_planner_orientation",
-                        transformations.quaternion_from_euler(
+                        quaternion_from_euler(
                             orient[0], orient[1], orient[2], "rxyz"
                         ),
                     )
