@@ -1,5 +1,6 @@
 import nengo
 import sys
+import glfw
 
 import mujoco_py
 import nengo_loihi
@@ -52,16 +53,16 @@ def demo():
 
     n_neurons = 1000
     n_ensembles = 10
-    pes_learning_rate = 3e-5
+    pes_learning_rate = 1
     seed = 0
     spherical = True  # project the input onto the surface of a D+1 hypersphere
     if spherical:
         n_input += 1
 
-    # means = ([0.12, 2.14, 1.87, 4.32, 0.59, 0.12, -0.38, -0.42, -0.29, 0.36],)
-    means = np.zeros(10)
-    # variances = ([0.08, 0.6, 0.7, 0.3, 0.6, 0.08, 1.4, 1.6, 0.7, 1.2],)
-    variances = np.hstack((np.ones(5) * 6.28, np.ones(5) * 1.25))
+    means = ([0.12, 2.14, 1.87, 4.32, 0.59, 0.12, -0.38, -0.42, -0.29, 0.36],)
+    variances = ([0.08, 0.6, 0.7, 0.3, 0.6, 0.08, 1.4, 1.6, 0.7, 1.2],)
+    # means = np.zeros(10)
+    # variances = np.hstack((np.ones(5) * 6.28, np.ones(5) * 1.25))
 
     # synapse time constants
     tau_input = 0.012  # on input connection
@@ -74,8 +75,8 @@ def demo():
     # set up neuron intercepts
     # intercepts_bounds = [-0.3, 0.1]
     # intercepts_mode = 0.1
-    intercepts_bounds = [-0.7, -0.4]
-    intercepts_mode = -0.5
+    intercepts_bounds = [-0.4, -0.1]
+    intercepts_mode = -0.3
 
     intercepts_dist = AreaIntercepts(
         dimensions=n_input,
@@ -192,6 +193,7 @@ def demo():
                 net.reach_mode = interface.viewer.reach_mode
 
                 if interface.viewer.exit:
+                    glfw.destroy_window(interface.viewer.window)
                     raise RuntimeError("Exit simulation")
 
                 if net.reach_mode != net.old_reach_mode:
@@ -373,6 +375,8 @@ def demo():
                     # adaptive signal added (no signal for last joint)
                     net.u[: robot_config.N_JOINTS - 1] += u_adapt
 
+                if net.count % 500 == 0:
+                    print('u_adapt: ', u_adapt)
                 # get our gripper command ---------------------------------------------
                 finger_q = np.array(
                     [data.qpos[model.get_joint_qpos_addr(finger)] for finger in fingers]
