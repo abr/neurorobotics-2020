@@ -159,6 +159,14 @@ def demo():
         }
     net.bodies = ['link1', 'link2', 'link3', 'link4', 'link5', 'link6', 'dumbbell']
     net.base_gravity = np.hstack((interface.model.opt.gravity, np.zeros(3)))
+    interface.set_mocap_xyz('moon', [0, 0, -100])
+    interface.set_mocap_xyz('mars', [0, 0, -100])
+    interface.set_mocap_xyz('jupiter', [0, 0, -100])
+    interface.set_mocap_xyz('earth', [1, 1, 0.5])
+    interface.set_mocap_xyz('obstacle', [0, 0, -100])
+    interface.set_mocap_xyz('path_planner', [0, 0, -100])
+    interface.set_mocap_xyz('target_orientation', [0, 0, -100])
+    interface.set_mocap_xyz('path_planner_orientation', [0, 0, -100])
 
     with net:
 
@@ -169,6 +177,7 @@ def demo():
         net.u_gripper_prev = np.zeros(3)
         net.path_vis = False  # start out not displaying path planner target
         net.u = np.zeros(robot_config.N_JOINTS + 3)
+        net.prev_planet = 'earth'
 
         net.final_xyz = deposit_xyz
         # make the target offset from that start position
@@ -436,7 +445,7 @@ def demo():
                         )
                     else:
                         interface.set_mocap_xyz(
-                            "path_planner_orientation", np.array([0, 0, -1])
+                            "path_planner_orientation", np.array([0, 0, -100])
                         )
                     net.path_vis = interface.viewer.path_vis
 
@@ -454,11 +463,18 @@ def demo():
                 # check if the ADAPT sign should be on --------------------------------
                 if not interface.viewer.adapt:
                     interface.set_mocap_xyz("adapt_off", adapt_text)
-                    interface.set_mocap_xyz("adapt_on", [0, 0, -1])
+                    interface.set_mocap_xyz("adapt_on", [0, 0, -100])
+
+                # display the planet
+                if interface.viewer.planet != net.prev_planet:
+                    interface.set_mocap_xyz(net.prev_planet, [0, 0, -100])
+                    interface.set_mocap_xyz(interface.viewer.planet, [1, 1, 0.5])
+                    net.prev_planet = interface.viewer.planet
+
 
             # we made it out of the loop, so the adapt sign should be on! -------------
             interface.set_mocap_xyz("adapt_on", adapt_text)
-            interface.set_mocap_xyz("adapt_off", [0, 0, -1])
+            interface.set_mocap_xyz("adapt_off", [0, 0, -100])
 
             # if adaptation is on, generate context signal for neural population ------
             feedback = interface.get_feedback()
