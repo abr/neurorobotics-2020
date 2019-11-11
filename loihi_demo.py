@@ -158,6 +158,7 @@ def demo():
         'ISS': np.array([0, 0, 0, 0, 0, 0]),
         }
     net.bodies = ['link1', 'link2', 'link3', 'link4', 'link5', 'link6', 'dumbbell']
+    net.base_gravity = np.hstack((interface.model.opt.gravity, np.zeros(3)))
 
     with net:
 
@@ -392,18 +393,12 @@ def demo():
 
                 # apply our gravity term
                 for body in net.bodies:
-                    print('--------------')
-                    print('planet: ', interface.viewer.planet)
-                    print('gravity: ', gravity)
-                    print('body: ', body)
-                    print('gravity diff: ', gravity - np.array([0, 0, -9.81, 0, 0, 0]))
-                    print('mass: ', interface.model.body_mass[interface.model.body_name2id(body)])
-                    force = (gravity - np.array([0, 0, -9.81, 0, 0, 0])
-                         * interface.model.body_mass[interface.model.body_name2id(body)])
-                    print('force: ', force)
                     interface.set_external_force(
-                        body, force
-                    )
+                        body,
+                        ((gravity - net.base_gravity)
+                        * interface.model.body_mass[interface.model.body_name2id(body)])
+                        )
+
                 # send to mujoco, stepping the sim forward
                 interface.send_forces(net.u)
 
@@ -450,11 +445,11 @@ def demo():
                     "%s\n" % net.reach["label"]
                     + "Error: %.3fm\n" % error
                     + "Gripper toggle: %i\n" % interface.viewer.gripper
-                    + "Dumbbell: %ikg"
+                    + "Dumbbell: %ikg\n"
                     % interface.model.body_mass[
-                        interface.model.body_name2id("dumbbell")
-                    ]
-                )
+                        interface.model.body_name2id("dumbbell")]
+                    + "Gravity: %s" % (interface.viewer.planet) #, gravity[2])
+                    )
 
                 # check if the ADAPT sign should be on --------------------------------
                 if not interface.viewer.adapt:
