@@ -13,6 +13,8 @@ from abr_control.arms.mujoco_config import MujocoConfig as arm
 from abr_control.interfaces.mujoco import Mujoco
 from abr_control.utils import transformations
 
+from abr_control.utils.transformations import quaternion_multiply, quaternion_inverse
+
 from utils import (
     AreaIntercepts,
     Triangular,
@@ -26,7 +28,7 @@ from utils import (
     adapt,
     first_order_arc,
     first_order_arc_dmp,
-    calculate_reach_params,
+    calculate_rotQ,
 )
 
 from reach_list import gen_reach_list
@@ -188,14 +190,14 @@ with net:
 
                     # target orientation should be that of an object in the environment
                     objQ = interface.get_orientation('handle', object_type='geom')
-                    rotQ = calculate_rotQ()
-                    quat = quaternion_multiply(rotQ, objQ)
-                    startQ = np.copy(quat)
+                    net.rotQ = calculate_rotQ()
+                    quat = quaternion_multiply(net.rotQ, objQ)
+                    net.startQ = np.copy(quat)
                     net.reach['orientation'] = quat
 
                 elif net.reach['target_options'] == 'shifted':
                     # account for the object in the hand having slipped / rotated
-                    rotQ = calculate_rotQ()
+                    net.rotQ = calculate_rotQ()
 
                     # get xyz of the hand
                     hand_xyz = interface.get_xyz('EE', object_type='body')
@@ -212,9 +214,9 @@ with net:
                     # get the difference between hand and object
                     rotQ_prime = quaternion_multiply(handQ_prime, quaternion_inverse(objQ_prime))
                     # compare with difference at start of movement
-                    dQ = quaternion_multiply(rotQ_prime, quaternion_inverse(rotQ))
+                    dQ = quaternion_multiply(rotQ_prime, quaternion_inverse(net.rotQ))
                     # transform the original target by the difference
-                    shiftedQ = quaternion_multiply(startQ, dQ)
+                    net.shiftedQ = quaternion_multiply(net.startQ, dQ)
 
                     net.reach['orientation'] = net.shiftedQ
 
