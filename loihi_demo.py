@@ -144,6 +144,14 @@ with net:
     net.u_gripper_prev = np.zeros(3)
     net.path_vis = False  # start out not displaying path planner target
     net.u = np.zeros(robot_config.N_JOINTS + 3)
+    net.gravities = {
+        'earth': np.array([0, 0, -9.81, 0, 0, 0]),
+        'moon': np.array([0, 0, -1.62, 0, 0, 0]),
+        'mars': np.array([0, 0, -3.71, 0, 0, 0]),
+        'jupiter': np.array([0, 0, -24.92, 0, 0, 0]),
+        'ISS': np.array([0, 0, 0, 0, 0, 0]),
+        }
+    net.bodies = ['link1', 'link2', 'link3', 'link4', 'link5', 'link6', 'dumbbell']
 
     net.final_xyz = deposit_xyz
     # make the target offset from that start position
@@ -348,15 +356,28 @@ with net:
             net.u_gripper_prev[:] = np.copy(u_gripper)
             net.u[robot_config.N_JOINTS:] = u_gripper * interface.viewer.gripper
 
-            # apply any external forces
-            interface.set_external_force(
-                'EE', np.array([0, 0, -9.81, 0, 0, 0]) * interface.viewer.external_force)
+            # set the world gravity
+            gravity = net.gravities[interface.viewer.planet]
 
-            # TODO temp, incorporate dumbbell mass change
+            # incorporate dumbbell mass change
             if interface.viewer.additional_mass != 0:
                 interface.model.body_mass[interface.model.body_name2id('dumbbell')] += interface.viewer.additional_mass
                 interface.viewer.additional_mass = 0
 
+            # apply our gravity term
+            for body in net.bodies:
+                print('--------------')
+                print('planet: ', interface.viewer.planet)
+                print('gravity: ', gravity)
+                print('body: ', body)
+                print('gravity diff: ', gravity - np.array([0, 0, -9.81, 0, 0, 0]))
+                print('mass: ', interface.model.body_mass[interface.model.body_name2id(body)])
+                force = (gravity - np.array([0, 0, -9.81, 0, 0, 0])
+                     * interface.model.body_mass[interface.model.body_name2id(body)])
+                print('force: ', force)
+                interface.set_external_force(
+                    body, force
+                )
             # send to mujoco, stepping the sim forward
             interface.send_forces(net.u)
 
