@@ -352,6 +352,11 @@ with net:
             interface.set_external_force(
                 'EE', np.array([0, 0, -9.81, 0, 0, 0]) * interface.viewer.external_force)
 
+            # TODO temp, incorporate dumbbell mass change
+            if interface.viewer.additional_mass != 0:
+                interface.model.body_mass[interface.model.body_name2id('dumbbell')] += interface.viewer.additional_mass
+                interface.viewer.additional_mass = 0
+
             # send to mujoco, stepping the sim forward
             interface.send_forces(net.u)
 
@@ -394,10 +399,12 @@ with net:
                 net.path_vis = interface.viewer.path_vis
 
             # print out information to mjviewer -------------------------------------------
-            interface.viewer.custom_print = "%s\nerror: %.3fm\nGripper toggle: %i" % (
-                net.reach["label"],
-                error,
-                interface.viewer.gripper,
+            interface.viewer.custom_print = (
+                    "%s\n" % net.reach["label"]
+                    + "Error: %.3fm\n" % error
+                    + "Gripper toggle: %i\n" % interface.viewer.gripper
+                    + "Dumbbell: %ikg" %
+                        interface.model.body_mass[interface.model.body_name2id('dumbbell')]
             )
 
             # check if the ADAPT sign should be on ------------------------------------
