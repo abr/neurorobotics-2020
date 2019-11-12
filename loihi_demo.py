@@ -471,6 +471,7 @@ def demo(backend):
                 if not interface.viewer.adapt:
                     interface.set_mocap_xyz("adapt_off", adapt_text)
                     interface.set_mocap_xyz("adapt_on", [0, 0, -100])
+                    interface.set_mocap_xyz("brain", [0, 0, -100])
 
                 # display the planet
                 if interface.viewer.planet != net.prev_planet:
@@ -482,6 +483,7 @@ def demo(backend):
             # we made it out of the loop, so the adapt sign should be on! -------------
             interface.set_mocap_xyz("adapt_on", adapt_text)
             interface.set_mocap_xyz("adapt_off", [0, 0, -100])
+            interface.set_mocap_xyz("brain", [0, 0, 1])
 
             # if adaptation is on, generate context signal for neural population ------
             feedback = interface.get_feedback()
