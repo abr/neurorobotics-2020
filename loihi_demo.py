@@ -53,16 +53,16 @@ def demo(backend):
 
     n_neurons = 1000
     n_ensembles = 10
-    pes_learning_rate = 3e-5 if backend == 'cpu' else 1
+    pes_learning_rate = 1e-5 if backend == 'cpu' else 1e-5
     seed = 0
     spherical = True  # project the input onto the surface of a D+1 hypersphere
     if spherical:
         n_input += 1
 
-    means = ([0.12, 2.14, 1.87, 4.32, 0.59, 0.12, -0.38, -0.42, -0.29, 0.36],)
-    variances = ([0.08, 0.6, 0.7, 0.3, 0.6, 0.08, 1.4, 1.6, 0.7, 1.2],)
-    # means = np.zeros(10)
-    # variances = np.hstack((np.ones(5) * 6.28, np.ones(5) * 1.25))
+    means = np.zeros(10)
+    variances = np.hstack((np.ones(5) * 6.28, np.ones(5) * 1.25))
+    # means = np.zeros(5)
+    # variances = np.ones(5) * 6.28
 
     # synapse time constants
     tau_input = 0.012  # on input connection
@@ -186,6 +186,9 @@ def demo(backend):
 
         def arm_func(t, u_adapt):
             global interface
+            adapt_scale = 1
+            if backend == 'loihi':
+                adapt_scale = 10
 
             ran_at_least_once = False
             while not ran_at_least_once or not interface.viewer.adapt:
@@ -373,7 +376,7 @@ def demo(backend):
 
                 if interface.viewer.adapt:
                     # adaptive signal added (no signal for last joint)
-                    net.u[: robot_config.N_JOINTS - 1] += u_adapt
+                    net.u[: robot_config.N_JOINTS - 1] += u_adapt * adapt_scale
 
                 if net.count % 500 == 0:
                     print('u_adapt: ', u_adapt)
@@ -487,6 +490,7 @@ def demo(backend):
                 means,
                 variances,
                 np.hstack([feedback["q"][:5], feedback["dq"][:5]]),
+                # feedback["q"][:5]
             )
             training_signal = -net.reach["ctrlr"].training_signal[:5]
             output_signal = np.hstack([context.flatten(), training_signal.flatten()])
@@ -573,14 +577,14 @@ if __name__ == '__main__':
                 ) as sim:
                     sim.run(0.01)
                     start = timeit.default_timer()
-                    sim.run(50)
+                    sim.run(1e5)
                     print("Run time: %0.5f" % (timeit.default_timer() - start))
                     print("timers: ", sim.timers["snips"])
             elif backend == "cpu":
                 with nengo.Simulator(net) as sim:
                     sim.run(0.01)
                     start = timeit.default_timer()
-                    sim.run(50)
+                    sim.run(1e5)
                     print("Run time: %0.5f" % (timeit.default_timer() - start))
                     # print("timers: ", sim.timers["snips"])
         except RuntimeError:
