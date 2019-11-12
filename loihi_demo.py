@@ -61,20 +61,13 @@ def demo(backend):
 
     means = np.zeros(10)
     variances = np.hstack((np.ones(5) * 6.28, np.ones(5) * 1.25))
-    # means = np.zeros(5)
-    # variances = np.ones(5) * 6.28
 
     # synapse time constants
     tau_input = 0.012  # on input connection
     tau_training = 0.012  # on the training signal
     tau_output = 0.012  # on the output from the adaptive ensemble
-    # NOTE: the time constant on the neural activity used in the learning
-    # connection is the default 0.005, and can be set by specifying the
-    # pre_synapse parameter inside the PES rule instantiation
 
     # set up neuron intercepts
-    # intercepts_bounds = [-0.3, 0.1]
-    # intercepts_mode = 0.1
     intercepts_bounds = [-0.4, -0.1]
     intercepts_mode = -0.3
 
@@ -84,10 +77,6 @@ def demo(backend):
     )
     intercepts = intercepts_dist.sample(n=n_neurons * n_ensembles, rng=rng)
     intercepts = intercepts.reshape(n_ensembles, n_neurons)
-
-    # TODO: add weight initialization ability to nengo_loihi
-    # weights = np.zeros((n_ensembles, n_output, n_neurons))
-    # print("Initializing connection weights to all zeros")
 
     np.random.seed = seed
     encoders_dist = ScatteredHypersphere(surface=True)
@@ -112,7 +101,6 @@ def demo(backend):
     net = nengo.Network(seed=seed)
     # Set the default neuron type for the network
     net.config[nengo.Ensemble].neuron_type = nengo.LIF()
-    # net.config[nengo.Connection].synapse = None
 
     object_xyz = np.array([-0.5, 0.0, 0.02])
     deposit_xyz = np.array([-0.4, 0.5, 0.4])
@@ -226,7 +214,6 @@ def demo(backend):
                     if net.reach_mode == "reach_target":
                         net.reach["target_pos"] = net.final_xyz
 
-                    # print('Next reach')
                     if net.reach["target_options"] == "object":
 
                         net.reach["target_pos"] = interface.get_xyz(
@@ -341,10 +328,6 @@ def demo(backend):
                 feedback = interface.get_feedback()
                 hand_xyz = robot_config.Tx("EE", feedback["q"])
 
-                if interface.viewer.move_elbow:
-                    interface.set_mocap_xyz(
-                        'elbow', robot_config.Tx('joint2', object_type='joint'))
-
                 # update our path planner position and orientation --------------------
                 if net.reach_mode == "reach_target":
                     error = np.linalg.norm(
@@ -355,17 +338,11 @@ def demo(backend):
                         net.vel = np.zeros(3)
                     else:
                         if not np.allclose(net.final_xyz, net.old_final_xyz, atol=1e-5):
-                            # if the target has moved, regenerate the path planner
-                            # net.trajectory_planner.reset(
-                            #     position=net.pos,
-                            #     target_pos=(net.final_xyz + net.reach["offset"]),
-                            # )
                             net.n_timesteps = net.reach["n_timesteps"] - net.count
                             net.trajectory_planner.generate_path(
                                 position=net.pos,
                                 target_pos=net.final_xyz + net.reach["offset"],
                             )
-                        # net.pos, net.vel = net.trajectory_planner._step(error=error)
                         net.pos, net.vel = net.trajectory_planner.next()
                     orient = np.zeros(3)
 
@@ -395,8 +372,6 @@ def demo(backend):
                     [data.qvel[model.get_joint_qpos_addr(finger)] for finger in fingers]
                 )
 
-                # NOTE interface lets you toggle gripper status with the 'n' key
-                # TODO remove the interface gripper control for actual demo
                 u_gripper = fkp * (net.reach["grasp_pos"] - finger_q) - fkv * finger_dq
                 u_gripper = (
                     net.reach["f_alpha"] * u_gripper
@@ -471,7 +446,7 @@ def demo(backend):
                     + "Dumbbell: %ikg\n"
                     % interface.model.body_mass[
                         interface.model.body_name2id("dumbbell")]
-                    + "Gravity: %s" % (interface.viewer.planet) #, gravity[2])
+                    + "Gravity: %s" % (interface.viewer.planet)
                     )
 
                 # check if the ADAPT sign should be on --------------------------------
@@ -497,7 +472,6 @@ def demo(backend):
                 means,
                 variances,
                 np.hstack([feedback["q"][:5], feedback["dq"][:5]]),
-                # feedback["q"][:5]
             )
             training_signal = -net.reach["ctrlr"].training_signal[:5]
             output_signal = np.hstack([context.flatten(), training_signal.flatten()])
@@ -582,18 +556,10 @@ if __name__ == '__main__':
                 with nengo_loihi.Simulator(
                     net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
                 ) as sim:
-                    sim.run(0.01)
-                    start = timeit.default_timer()
                     sim.run(1e5)
-                    print("Run time: %0.5f" % (timeit.default_timer() - start))
-                    print("timers: ", sim.timers["snips"])
             elif backend == "cpu":
                 with nengo.Simulator(net) as sim:
-                    sim.run(0.01)
-                    start = timeit.default_timer()
                     sim.run(1e5)
-                    print("Run time: %0.5f" % (timeit.default_timer() - start))
-                    # print("timers: ", sim.timers["snips"])
         except RuntimeError:
             pass
 
