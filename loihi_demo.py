@@ -45,7 +45,7 @@ else:
 print("Using %s as backend" % backend)
 
 
-def demo():
+def demo(backend):
     rng = np.random.RandomState(9)
 
     n_input = 10
@@ -53,7 +53,7 @@ def demo():
 
     n_neurons = 1000
     n_ensembles = 10
-    pes_learning_rate = 1
+    pes_learning_rate = 3e-5 if backend == 'cpu' else 1
     seed = 0
     spherical = True  # project the input onto the surface of a D+1 hypersphere
     if spherical:
@@ -562,28 +562,35 @@ def demo():
     return net, interface
 
 
-while 1:
-    net, interface = demo()
+if __name__ == '__main__':
+    # if we're running outside of Nengo GUI
+    while 1:
+        net, interface = demo(backend)
+        try:
+            if backend == "loihi":
+                with nengo_loihi.Simulator(
+                    net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
+                ) as sim:
+                    sim.run(0.01)
+                    start = timeit.default_timer()
+                    sim.run(50)
+                    print("Run time: %0.5f" % (timeit.default_timer() - start))
+                    print("timers: ", sim.timers["snips"])
+            elif backend == "cpu":
+                with nengo.Simulator(net) as sim:
+                    sim.run(0.01)
+                    start = timeit.default_timer()
+                    sim.run(50)
+                    print("Run time: %0.5f" % (timeit.default_timer() - start))
+                    # print("timers: ", sim.timers["snips"])
+        except RuntimeError:
+            pass
 
+        finally:
+            interface.disconnect()
+else:
+    # if we're running inside Nengo GUI
     try:
-        if backend == "loihi":
-            with nengo_loihi.Simulator(
-                net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
-            ) as sim:
-                sim.run(0.01)
-                start = timeit.default_timer()
-                sim.run(50)
-                print("Run time: %0.5f" % (timeit.default_timer() - start))
-                print("timers: ", sim.timers["snips"])
-        elif backend == "cpu":
-            with nengo.Simulator(net) as sim:
-                sim.run(0.01)
-                start = timeit.default_timer()
-                sim.run(50)
-                print("Run time: %0.5f" % (timeit.default_timer() - start))
-                # print("timers: ", sim.timers["snips"])
-    except RuntimeError:
-        pass
-
+        model, interface = demo()
     finally:
         interface.disconnect()
