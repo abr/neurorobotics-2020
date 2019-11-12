@@ -116,7 +116,6 @@ def demo(backend):
 
     object_xyz = np.array([-0.5, 0.0, 0.02])
     deposit_xyz = np.array([-0.4, 0.5, 0.4])
-    adapt_text = np.array([0, 1, 0])
 
     scale = 0.05
     xlim = [-0.5, 0.5]
@@ -141,7 +140,11 @@ def demo(backend):
     green = [0, 0.9, 0, 0.5]
     red = [0.9, 0, 0, 0.5]
 
+    adapt_on = [0.9, 0.75, 0.1, 1]
+    adapt_off = [0.5, 0.5, 0.5, 0.1]
+
     OUTPUT_ZEROS = np.zeros(n_input + n_output)
+    adapt_geom_id = model.geom_name2id("adapt")
     target_geom_id = model.geom_name2id("target")
 
     net.old_reach_mode = None
@@ -338,6 +341,10 @@ def demo(backend):
                 feedback = interface.get_feedback()
                 hand_xyz = robot_config.Tx("EE", feedback["q"])
 
+                if interface.viewer.move_elbow:
+                    interface.set_mocap_xyz(
+                        'elbow', robot_config.Tx('joint2', object_type='joint'))
+
                 # update our path planner position and orientation --------------------
                 if net.reach_mode == "reach_target":
                     error = np.linalg.norm(
@@ -469,8 +476,7 @@ def demo(backend):
 
                 # check if the ADAPT sign should be on --------------------------------
                 if not interface.viewer.adapt:
-                    interface.set_mocap_xyz("adapt_off", adapt_text)
-                    interface.set_mocap_xyz("adapt_on", [0, 0, -100])
+                    model.geom_rgba[adapt_geom_id] = adapt_off
                     interface.set_mocap_xyz("brain", [0, 0, -100])
 
                 # display the planet
@@ -481,8 +487,7 @@ def demo(backend):
 
 
             # we made it out of the loop, so the adapt sign should be on! -------------
-            interface.set_mocap_xyz("adapt_on", adapt_text)
-            interface.set_mocap_xyz("adapt_off", [0, 0, -100])
+            model.geom_rgba[adapt_geom_id] = adapt_on
             interface.set_mocap_xyz("brain", [0, 0, 1])
 
             # if adaptation is on, generate context signal for neural population ------
@@ -570,7 +575,7 @@ def demo(backend):
 
 if __name__ == '__main__':
     # if we're running outside of Nengo GUI
-    while 1:
+    # while 1:
         net, interface = demo(backend)
         try:
             if backend == "loihi":
