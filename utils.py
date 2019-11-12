@@ -16,6 +16,16 @@ from nengo.dists import Distribution, UniformHypersphere
 from nengo.utils.compat import is_integer
 
 
+class ExitSim(Exception):
+    print('Restarting simulation')
+    pass
+
+
+class RestartMujoco(Exception):
+    print('Restarting Mujoco')
+    pass
+
+
 def _get_approach(
     target_pos, approach_buffer=0.03, offset=None, z_rot=None, rot_wrist=False
 ):
@@ -255,12 +265,6 @@ def adapt(in_index, spherical):
     # encoders
     hypersphere = ScatteredHypersphere(surface=True)
     encoders = hypersphere.sample(n_neurons * n_ensembles, n_input)
-
-    # not incoporated, but sometimes we zero enc dims at this step
-    # if cpu['zeroed_enc_range'] is not None:
-    #     cpu['encoders'] = scripts.zero_encoder_dims.run(
-    #         encoders=cpu['encoders'],
-    #         zeroed_dims=cpu['zeroed_enc_range'])
 
     encoders = encoders.reshape(n_ensembles, n_neurons, n_input)
 

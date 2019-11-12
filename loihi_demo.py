@@ -34,6 +34,8 @@ from utils import (
     first_order_arc,
     first_order_arc_dmp,
     calculate_rotQ,
+    ExitSim,
+    RestartMujoco,
 )
 
 from reach_list import gen_reach_list
@@ -44,6 +46,21 @@ else:
     backend = "loihi"
 print("Using %s as backend" % backend)
 
+
+def initialize_mujoco(robot_config):
+    # create our Mujoco interface
+    interface = Mujoco(robot_config, dt=0.001, visualize=True)
+    interface.connect()
+    interface.send_target_angles(robot_config.START_ANGLES)
+
+    return interface
+
+def restart_mujoco(net, interface, robot_config):
+    interface.disconnect()
+    del interface
+    interface = initialize_mujoco(robot_config)
+    interface.set_mocap_xyz(name="target", xyz=net.final_xyz)
+    return interface
 
 def demo(backend):
     rng = np.random.RandomState(9)
@@ -85,14 +102,6 @@ def demo(backend):
 
     # initialize our robot config for the jaco2
     robot_config = MujocoConfig("jaco2_gripper", use_sim_state=True)
-
-    def initialize_mujoco(robot_config):
-        # create our Mujoco interface
-        interface = Mujoco(robot_config, dt=0.001, visualize=True)
-        interface.connect()
-        interface.send_target_angles(robot_config.START_ANGLES)
-
-        return interface
 
     interface = initialize_mujoco(robot_config)
     model = interface.sim.model
@@ -194,7 +203,10 @@ def demo(backend):
 
                 if interface.viewer.exit:
                     glfw.destroy_window(interface.viewer.window)
-                    raise RuntimeError("Exit simulation")
+                    raise ExitSim()
+
+                if interface.viewer.restart_sim:
+                    raise RestartMujoco()
 
                 if net.reach_mode != net.old_reach_mode:
                     print("Reach mode changed")
@@ -471,7 +483,7 @@ def demo(backend):
 
             # we made it out of the loop, so the adapt sign should be on! -------------
             model.geom_rgba[adapt_geom_id] = adapt_on
-            interface.set_mocap_xyz("brain", [0, 0, 1])
+            interface.set_mocap_xyz("brain", [0, 1, .2])
 
             # if adaptation is on, generate context signal for neural population ------
             feedback = interface.get_feedback()
@@ -552,23 +564,33 @@ def demo(backend):
             # TODO: account for scaling on the transform here
             nengo.Connection(arm[n_input:], conn_learn[ii].learning_rule, synapse=None)
 
-    return net, interface
+    return net, interface, robot_config
 
 
 if __name__ == '__main__':
     # if we're running outside of Nengo GUI
     # while 1:
-        net, interface = demo(backend)
+        net, interface, robot_config = demo(backend)
         try:
             if backend == "loihi":
                 with nengo_loihi.Simulator(
                     net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
                 ) as sim:
-                    sim.run(1e5)
+                    while 1:
+                        try:
+                            sim.run(1e5)
+                        except RestartMujoco:
+                            interface = restart_mujoco(net, interface, robot_config)
+
             elif backend == "cpu":
                 with nengo.Simulator(net) as sim:
-                    sim.run(1e5)
-        except RuntimeError:
+                    while 1:
+                        try:
+                            sim.run(1e5)
+                        except RestartMujoco:
+                            interface = restart_mujoco(net, interface, robot_config)
+
+        except ExitSim:
             pass
 
         finally:
