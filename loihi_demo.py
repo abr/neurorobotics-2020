@@ -154,6 +154,12 @@ def demo(backend):
     interface.set_mocap_xyz('moon', [0, 0, -100])
     interface.set_mocap_xyz('mars', [0, 0, -100])
     interface.set_mocap_xyz('jupiter', [0, 0, -100])
+    interface.set_mocap_xyz('ISS', [0, 0, -100])
+    interface.set_mocap_xyz('moon_floor', [0, 0, -100])
+    interface.set_mocap_xyz('mars_floor', [0, 0, -100])
+    interface.set_mocap_xyz('jupiter_floor', [0, 0, -100])
+    interface.set_mocap_xyz('ISS_floor', [0, 0, -100])
+ 
     interface.set_mocap_xyz('earth', [1, 1, 0.5])
     interface.set_mocap_xyz('obstacle', [0, 0, -100])
     interface.set_mocap_xyz('path_planner', [0, 0, -100])
@@ -362,8 +368,8 @@ def demo(backend):
                     # adaptive signal added (no signal for last joint)
                     net.u[: robot_config.N_JOINTS - 1] += u_adapt * adapt_scale
 
-                if net.count % 500 == 0:
-                    print('u_adapt: ', u_adapt)
+                # if net.count % 500 == 0:
+                #     print('u_adapt: ', u_adapt)
                 # get our gripper command ---------------------------------------------
                 finger_q = np.array(
                     [data.qpos[model.get_joint_qpos_addr(finger)] for finger in fingers]
@@ -458,6 +464,8 @@ def demo(backend):
                 if interface.viewer.planet != net.prev_planet:
                     interface.set_mocap_xyz(net.prev_planet, [0, 0, -100])
                     interface.set_mocap_xyz(interface.viewer.planet, [1, 1, 0.5])
+                    interface.set_mocap_xyz('%s_floor' % net.prev_planet, [0, 0, -100])
+                    interface.set_mocap_xyz('%s_floor' % interface.viewer.planet, [0, 0, 0.0])
                     net.prev_planet = interface.viewer.planet
 
 
