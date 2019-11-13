@@ -1,13 +1,11 @@
-import nengo
-import sys
 import glfw
-
 import mujoco_py
+import nengo
 import nengo_loihi
 import numpy as np
+import sys
 import timeit
 import traceback
-
 
 from nengo_loihi import decode_neurons
 
@@ -55,6 +53,7 @@ def initialize_mujoco(robot_config):
 
     return interface
 
+
 def restart_mujoco(interface, robot_config):
     target = np.copy(interface.viewer.target)
     glfw.destroy_window(interface.viewer.window)
@@ -65,23 +64,24 @@ def restart_mujoco(interface, robot_config):
     interface.set_mocap_xyz(name="target", xyz=interface.viewer.target)
     return interface
 
+
 def initialize_interface(interface):
 
-    interface.set_mocap_xyz('moon', [0, 0, -100])
-    interface.set_mocap_xyz('mars', [0, 0, -100])
-    interface.set_mocap_xyz('jupiter', [0, 0, -100])
-    interface.set_mocap_xyz('ISS', [0, 0, -100])
-    interface.set_mocap_xyz('moon_floor', [0, 0, -100])
-    interface.set_mocap_xyz('mars_floor', [0, 0, -100])
-    interface.set_mocap_xyz('jupiter_floor', [0, 0, -100])
-    interface.set_mocap_xyz('ISS_floor', [0, 0, -100])
+    interface.set_mocap_xyz("moon", [0, 0, -100])
+    interface.set_mocap_xyz("mars", [0, 0, -100])
+    interface.set_mocap_xyz("jupiter", [0, 0, -100])
+    interface.set_mocap_xyz("ISS", [0, 0, -100])
+    interface.set_mocap_xyz("moon_floor", [0, 0, -100])
+    interface.set_mocap_xyz("mars_floor", [0, 0, -100])
+    interface.set_mocap_xyz("jupiter_floor", [0, 0, -100])
+    interface.set_mocap_xyz("ISS_floor", [0, 0, -100])
 
-    interface.set_mocap_xyz('earth', [1, 1, 0.5])
-    interface.set_mocap_xyz('obstacle', [0, 0, -100])
-    interface.set_mocap_xyz('path_planner', [0, 0, -100])
-    interface.set_mocap_xyz('target_orientation', [0, 0, -100])
-    interface.set_mocap_xyz('path_planner_orientation', [0, 0, -100])
-    interface.set_mocap_xyz('elbow', [0, 0, -100])
+    interface.set_mocap_xyz("earth", [1, 1, 0.5])
+    interface.set_mocap_xyz("obstacle", [0, 0, -100])
+    interface.set_mocap_xyz("path_planner", [0, 0, -100])
+    interface.set_mocap_xyz("target_orientation", [0, 0, -100])
+    interface.set_mocap_xyz("path_planner_orientation", [0, 0, -100])
+    interface.set_mocap_xyz("elbow", [0, 0, -100])
 
     interface.viewer.target = np.array([-0.4, 0.5, 0.4])
     interface.target_moved = True
@@ -95,7 +95,7 @@ def demo(backend):
 
     n_neurons = 1000
     n_ensembles = 10
-    pes_learning_rate = 1e-5 if backend == 'cpu' else 1e-5
+    pes_learning_rate = 1e-5 if backend == "cpu" else 1e-5
     seed = 0
     spherical = True  # project the input onto the surface of a D+1 hypersphere
     if spherical:
@@ -139,8 +139,6 @@ def demo(backend):
     object_xyz = np.array([-0.5, 0.0, 0.02])
 
     reach_list = gen_reach_list(robot_config, object_xyz, interface.viewer.target)
-    net.reach_type = 'manual'
-    interface.viewer.reach_type = net.reach_type
 
     # max grip force
     max_grip = 8
@@ -162,123 +160,113 @@ def demo(backend):
     adapt_geom_id = model.geom_name2id("adapt")
     target_geom_id = model.geom_name2id("target")
 
-    net.old_reach_mode = None
-    net.reach_index = -1
-    net.next_reach = False
-    net.reach = None
-    net.u_gripper_prev = np.zeros(3)
     net.path_vis = False  # start out not displaying path planner target
-    net.u = np.zeros(robot_config.N_JOINTS + 3)
     net.gravities = {
-        'earth': np.array([0, 0, -9.81, 0, 0, 0]),
-        'moon': np.array([0, 0, -1.62, 0, 0, 0]),
-        'mars': np.array([0, 0, -3.71, 0, 0, 0]),
-        'jupiter': np.array([0, 0, -24.92, 0, 0, 0]),
-        'ISS': np.array([0, 0, 0, 0, 0, 0]),
-        }
-    net.bodies = ['link1', 'link2', 'link3', 'link4', 'link5', 'link6', 'dumbbell']
+        "earth": np.array([0, 0, -9.81, 0, 0, 0]),
+        "moon": np.array([0, 0, -1.62, 0, 0, 0]),
+        "mars": np.array([0, 0, -3.71, 0, 0, 0]),
+        "jupiter": np.array([0, 0, -24.92, 0, 0, 0]),
+        "ISS": np.array([0, 0, 0, 0, 0, 0]),
+    }
+    net.bodies = ["link1", "link2", "link3", "link4", "link5", "link6", "dumbbell"]
     net.base_gravity = np.hstack((interface.model.opt.gravity, np.zeros(3)))
 
     initialize_interface(interface)
 
-    with net:
-
-        net.auto_reach_modes = ([
-            'reach_target',
-            'pick_up',
-            'reach_target',
-            'reach_target'])
-        net.auto_reach_index = 0
-
-        net.auto_target_index = 0
-        net.auto_targets = np.array([
-            [-0.40,  0.50,  0.40],
-            # [-0.10,  0.50,  0.50],
-            # [0.39, 0.50, 0.29],
-            # [ 0.39, -0.20,  0.39],
-            # [ 0.09, -0.49,  0.69],
-            # [ 0.10, -0.40,  0.50],
-            # [-0.30, -0.49,   0.70],
-            # [-0.49, -0.30,  0.70 ],
-            # [-0.39, -0.20,  0.60],
-            [-0.40, 0.10,  0.30]]
-            )
-
-        net.old_reach_mode = None
-        net.old_reach_type = net.reach_type
+    def initialize_net(net):
         net.reach_index = -1
-        net.next_reach = False
+        net.next_reach = True
         net.reach = None
         net.u_gripper_prev = np.zeros(3)
-        net.path_vis = False  # start out not displaying path planner target
         net.u = np.zeros(robot_config.N_JOINTS + 3)
-        net.prev_planet = 'earth'
+        net.prev_planet = "earth"
+        net.auto_reach_index = 0
+        net.auto_target_index = 0
+        net.count = 0
+
+    with net:
+
+        net.auto_reach_modes = [
+            "reach_target",
+            "pick_up",
+            "reach_target",
+            "reach_target",
+        ]
+
+        net.auto_targets = np.array(
+            [
+                [-0.40, 0.50, 0.40],
+                # [-0.10,  0.50,  0.50],
+                # [0.39, 0.50, 0.29],
+                # [ 0.39, -0.20,  0.39],
+                # [ 0.09, -0.49,  0.69],
+                # [ 0.10, -0.40,  0.50],
+                # [-0.30, -0.49,   0.70],
+                # [-0.49, -0.30,  0.70 ],
+                # [-0.39, -0.20,  0.60],
+                [-0.40, 0.10, 0.30],
+            ]
+        )
 
         # make the target offset from that start position
         interface.set_mocap_xyz(name="target", xyz=interface.viewer.target)
+        initialize_net(net)
+        net.demo_mode = False
+        net.path_vis = False  # start out not displaying path planner target
 
         def arm_func(t, u_adapt):
             global interface
             adapt_scale = 1
-            if backend == 'loihi':
+            if backend == "loihi":
                 adapt_scale = 10
 
             ran_at_least_once = False
             while not ran_at_least_once or not interface.viewer.adapt:
                 ran_at_least_once = True
 
-                # if we've reset, make sure to maintain our previous mode (auto or manual)
-                if interface.viewer.reach_type is None:
-                    interface.viewer.reach_type = net.reach_type
-                # if the viewer reach type is not None, then it has been updated since restart
-                else:
-                    net.reach_type = interface.viewer.reach_type
-
-                if net.reach_type == 'manual':
-                    net.reach_mode = interface.viewer.reach_mode
-                    net.auto_reach_index = 0
-                    net.auto_target_index = 0
-                elif net.reach_type == 'auto':
-                    net.reach_mode = net.auto_reach_modes[net.auto_reach_index]
-                    interface.viewer.target = net.auto_targets[net.auto_target_index]
-
-                # reset if switching to auto mode
-                if net.reach_type == 'auto' and net.old_reach_type == 'manual':
-                    print('Switching to %s mode' % net.reach_type)
-                    net.auto_reach_index = 0
-                    net.auto_target_index = 0
-                    net.count = 0
-                    net.old_reach_type = 'auto'
-                    raise RestartMujoco()
-                net.old_reach_type = net.reach_type
-
                 if interface.viewer.exit:
                     glfw.destroy_window(interface.viewer.window)
                     raise ExitSim()
 
+                # if switching to demo script / auto mode, reset Mujoco
+                if interface.viewer.toggle_demo:
+                    print("Toggle demo")
+                    net.demo_mode = not net.demo_mode
+                    if net.demo_mode:
+                        print("Switching to demo mode")
+                        interface.viewer.restart_sim = True
+                    interface.viewer.toggle_demo = False
+
                 if interface.viewer.restart_sim:
+                    initialize_net(net)
                     raise RestartMujoco()
 
-                if net.reach_mode != net.old_reach_mode:
+                if net.demo_mode:
+                    net.reach_mode = net.auto_reach_modes[net.auto_reach_index]
+                    interface.viewer.target = net.auto_targets[net.auto_target_index]
+                else:
+                    net.reach_mode = interface.viewer.reach_mode
+                    net.auto_reach_index = 0
+                    net.auto_target_index = 0
+
+                if interface.viewer.reach_mode_changed:
                     print("Reach mode changed")
                     net.next_reach = True
-                    net.old_reach_mode = net.reach_mode
                     net.reach_index = -1
+                    interface.viewer.reach_mode_changed = False
 
                 # if the reaching mode has changed, recalculate reaching parameters ---
                 if net.next_reach:
                     print("Generating next reach")
                     net.reach_index += 1
                     if net.reach_index >= len(reach_list[net.reach_mode]):
-                        if net.reach_mode != 'reach_target' and net.reach_type == 'auto':
+                        if net.reach_mode != "reach_target" and net.demo_mode:
                             net.auto_reach_index += 1
                             if net.auto_reach_index == 3:
                                 interface.viewer.adapt = True
                             else:
                                 interface.viewer.adapt = False
                             net.auto_target_index = 0
-                            # interface.viewer.target_moved = True
-                            #
                         interface.viewer.reach_mode = "reach_target"
                         net.reach_mode = interface.viewer.reach_mode
                         net.reach_index = -1
@@ -371,13 +359,6 @@ def demo(backend):
                 feedback = interface.get_feedback()
                 hand_xyz = robot_config.Tx("EE")
 
-                if interface.viewer.move_elbow:
-                    interface.set_mocap_xyz(
-                        'elbow', robot_config.Tx('joint2', object_type='joint'))
-                else:
-                    interface.set_mocap_xyz('elbow', [0, 0, -100])
-                interface.set_external_force('ring2', interface.viewer.elbow_force)
-
                 # update our path planner position and orientation --------------------
                 if net.reach_mode == "reach_target":
                     error = np.linalg.norm(
@@ -411,6 +392,15 @@ def demo(backend):
 
                 target = np.hstack([net.pos, orient])
 
+                # apply force to elbow if one has been set! ---------------------------
+                if interface.viewer.move_elbow:
+                    interface.set_mocap_xyz(
+                        "elbow", robot_config.Tx("joint2", object_type="joint")
+                    )
+                else:
+                    interface.set_mocap_xyz("elbow", [0, 0, -100])
+                interface.set_external_force("ring2", interface.viewer.elbow_force)
+
                 # calculate our osc control signal ------------------------------------
                 net.u[: robot_config.N_JOINTS] = net.reach["ctrlr"].generate(
                     q=feedback["q"], dq=feedback["dq"], target=target
@@ -442,16 +432,22 @@ def demo(backend):
 
                 # incorporate dumbbell mass change
                 if interface.viewer.additional_mass != 0:
-                    interface.model.body_mass[interface.model.body_name2id('dumbbell')] += interface.viewer.additional_mass
+                    interface.model.body_mass[
+                        interface.model.body_name2id("dumbbell")
+                    ] += interface.viewer.additional_mass
                     interface.viewer.additional_mass = 0
 
                 # apply our gravity term
                 for body in net.bodies:
                     interface.set_external_force(
                         body,
-                        ((gravity - net.base_gravity)
-                        * interface.model.body_mass[interface.model.body_name2id(body)])
-                        )
+                        (
+                            (gravity - net.base_gravity)
+                            * interface.model.body_mass[
+                                interface.model.body_name2id(body)
+                            ]
+                        ),
+                    )
 
                 # send to mujoco, stepping the sim forward
                 interface.send_forces(net.u)
@@ -463,23 +459,27 @@ def demo(backend):
                     else:
                         model.geom_rgba[target_geom_id] = red
 
-                    if net.reach_type == 'auto':
-                        #TODO: if adapting add a hold timesteps
+                    if net.demo_mode:
+                        # TODO: if adapting add a hold timesteps
                         hold_timesteps = 0
                         if error < 0.02 or net.count >= hold_timesteps + 2000:
                             net.next_reach = True
-                            print('maxed out timesteps')
+                            print("maxed out timesteps")
 
                             # if at our last target, go to the next part of the reach
-                            if net.auto_target_index == len(net.auto_targets)-1:
+                            if net.auto_target_index == len(net.auto_targets) - 1:
                                 # if at last part of reach, restart
-                                if net.auto_reach_index == len(net.auto_reach_modes)-1:
-                                    net.auto_reach_index = 0
-                                    net.auto_target_index = 0
-                                    print('last part and last target, restart auto mode')
+                                if (
+                                    net.auto_reach_index
+                                    == len(net.auto_reach_modes) - 1
+                                ):
+                                    print(
+                                        "last part and last target, restart auto mode"
+                                    )
+                                    initialize_net(net)
                                     raise RestartMujoco()
                                 else:
-                                    print('going to next reach mode')
+                                    print("going to next reach mode")
                                     net.auto_reach_index += 1
                                     if net.auto_reach_index == 3:
                                         interface.viewer.adapt = True
@@ -488,7 +488,7 @@ def demo(backend):
                                     net.auto_target_index = 0
                             # otherwise, go to next target
                             else:
-                                print('going to next target')
+                                print("going to next target")
                                 net.auto_target_index += 1
                             interface.viewer.target_moved = True
 
@@ -505,7 +505,6 @@ def demo(backend):
                             net.next_reach = True
                     elif net.count > net.reach["n_timesteps"] * 2 and error < 0.07:
                         net.next_reach = True
-
 
                 net.count += 1
 
@@ -532,11 +531,12 @@ def demo(backend):
                     + "Gripper toggle: %i\n" % interface.viewer.gripper
                     + "Dumbbell: %ikg\n"
                     % interface.model.body_mass[
-                        interface.model.body_name2id("dumbbell")]
+                        interface.model.body_name2id("dumbbell")
+                    ]
                     + "Gravity: %s\n" % (interface.viewer.planet)
-                    + "Net Mode: %s\n" % net.reach_type
-                    + "Interface Mode: %s\n" % interface.viewer.reach_type
-                    )
+                    + "Demonstration Mode: %s\n" % net.demo_mode
+                    # + "Interface Mode: %s\n" % interface.viewer.reach_type
+                )
 
                 # check if the ADAPT sign should be on --------------------------------
                 if not interface.viewer.adapt:
@@ -547,14 +547,15 @@ def demo(backend):
                 if interface.viewer.planet != net.prev_planet:
                     interface.set_mocap_xyz(net.prev_planet, [0, 0, -100])
                     interface.set_mocap_xyz(interface.viewer.planet, [1, 1, 0.5])
-                    interface.set_mocap_xyz('%s_floor' % net.prev_planet, [0, 0, -100])
-                    interface.set_mocap_xyz('%s_floor' % interface.viewer.planet, [0, 0, 0.0])
+                    interface.set_mocap_xyz("%s_floor" % net.prev_planet, [0, 0, -100])
+                    interface.set_mocap_xyz(
+                        "%s_floor" % interface.viewer.planet, [0, 0, 0.0]
+                    )
                     net.prev_planet = interface.viewer.planet
-
 
             # we made it out of the loop, so the adapt sign should be on! -------------
             model.geom_rgba[adapt_geom_id] = adapt_on
-            interface.set_mocap_xyz("brain", [0, 1, .2])
+            interface.set_mocap_xyz("brain", [0, 1, 0.2])
 
             # if adaptation is on, generate context signal for neural population ------
             feedback = interface.get_feedback()
@@ -638,34 +639,34 @@ def demo(backend):
     return net, interface, robot_config
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # if we're running outside of Nengo GUI
     # while 1:
-        net, interface, robot_config = demo(backend)
-        try:
-            if backend == "loihi":
-                with nengo_loihi.Simulator(
-                    net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
-                ) as sim:
-                    while 1:
-                        try:
-                            sim.run(1e5)
-                        except RestartMujoco:
-                            interface = restart_mujoco(interface, robot_config)
+    net, interface, robot_config = demo(backend)
+    try:
+        if backend == "loihi":
+            with nengo_loihi.Simulator(
+                net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
+            ) as sim:
+                while 1:
+                    try:
+                        sim.run(1e5)
+                    except RestartMujoco:
+                        interface = restart_mujoco(interface, robot_config)
 
-            elif backend == "cpu":
-                with nengo.Simulator(net) as sim:
-                    while 1:
-                        try:
-                            sim.run(1e5)
-                        except RestartMujoco:
-                            interface = restart_mujoco(interface, robot_config)
+        elif backend == "cpu":
+            with nengo.Simulator(net) as sim:
+                while 1:
+                    try:
+                        sim.run(1e5)
+                    except RestartMujoco:
+                        interface = restart_mujoco(interface, robot_config)
 
-        except ExitSim:
-            pass
+    except ExitSim:
+        pass
 
-        finally:
-            interface.disconnect()
+    finally:
+        interface.disconnect()
 else:
     # if we're running inside Nengo GUI
     try:
