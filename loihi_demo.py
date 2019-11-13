@@ -137,7 +137,10 @@ def demo(backend):
     green = [0, 0.9, 0, 0.5]
     red = [0.9, 0, 0, 0.5]
 
-    adapt_on = [0.9, 0.75, 0.1, 1]
+    # yellow
+    # adapt_on = [0.9, 0.75, 0.1, 1]
+    # silver
+    adapt_on = [0.77, 0.79, 0.81, 1]
     adapt_off = [0.5, 0.5, 0.5, 0.1]
 
     OUTPUT_ZEROS = np.zeros(n_input + n_output)
