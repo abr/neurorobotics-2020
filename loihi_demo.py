@@ -56,11 +56,36 @@ def initialize_mujoco(robot_config):
     return interface
 
 def restart_mujoco(interface, robot_config):
+    target = np.copy(interface.viewer.target)
+    glfw.destroy_window(interface.viewer.window)
     interface.disconnect()
     del interface
     interface = initialize_mujoco(robot_config)
+    initialize_interface(interface)
     interface.set_mocap_xyz(name="target", xyz=interface.viewer.target)
     return interface
+
+def initialize_interface(interface):
+
+    interface.set_mocap_xyz('moon', [0, 0, -100])
+    interface.set_mocap_xyz('mars', [0, 0, -100])
+    interface.set_mocap_xyz('jupiter', [0, 0, -100])
+    interface.set_mocap_xyz('ISS', [0, 0, -100])
+    interface.set_mocap_xyz('moon_floor', [0, 0, -100])
+    interface.set_mocap_xyz('mars_floor', [0, 0, -100])
+    interface.set_mocap_xyz('jupiter_floor', [0, 0, -100])
+    interface.set_mocap_xyz('ISS_floor', [0, 0, -100])
+
+    interface.set_mocap_xyz('earth', [1, 1, 0.5])
+    interface.set_mocap_xyz('obstacle', [0, 0, -100])
+    interface.set_mocap_xyz('path_planner', [0, 0, -100])
+    interface.set_mocap_xyz('target_orientation', [0, 0, -100])
+    interface.set_mocap_xyz('path_planner_orientation', [0, 0, -100])
+    interface.set_mocap_xyz('elbow', [0, 0, -100])
+
+    interface.viewer.target = np.array([-0.4, 0.5, 0.4])
+    interface.target_moved = True
+
 
 def demo(backend):
     rng = np.random.RandomState(9)
@@ -112,8 +137,6 @@ def demo(backend):
     net.config[nengo.Ensemble].neuron_type = nengo.LIF()
 
     object_xyz = np.array([-0.5, 0.0, 0.02])
-    interface.viewer.target = np.array([-0.4, 0.5, 0.4])
-    interface.viewer.old_target = np.array([-0.4, 0.5, 0.4])
 
     reach_list = gen_reach_list(robot_config, object_xyz, interface.viewer.target)
     net.reach_type = 'manual'
@@ -155,21 +178,8 @@ def demo(backend):
         }
     net.bodies = ['link1', 'link2', 'link3', 'link4', 'link5', 'link6', 'dumbbell']
     net.base_gravity = np.hstack((interface.model.opt.gravity, np.zeros(3)))
-    interface.set_mocap_xyz('moon', [0, 0, -100])
-    interface.set_mocap_xyz('mars', [0, 0, -100])
-    interface.set_mocap_xyz('jupiter', [0, 0, -100])
-    interface.set_mocap_xyz('ISS', [0, 0, -100])
-    interface.set_mocap_xyz('moon_floor', [0, 0, -100])
-    interface.set_mocap_xyz('mars_floor', [0, 0, -100])
-    interface.set_mocap_xyz('jupiter_floor', [0, 0, -100])
-    interface.set_mocap_xyz('ISS_floor', [0, 0, -100])
 
-    interface.set_mocap_xyz('earth', [1, 1, 0.5])
-    interface.set_mocap_xyz('obstacle', [0, 0, -100])
-    interface.set_mocap_xyz('path_planner', [0, 0, -100])
-    interface.set_mocap_xyz('target_orientation', [0, 0, -100])
-    interface.set_mocap_xyz('path_planner_orientation', [0, 0, -100])
-    interface.set_mocap_xyz('elbow', [0, 0, -100])
+    initialize_interface(interface)
 
     with net:
 
@@ -342,12 +352,6 @@ def demo(backend):
                     net.count = 0
 
 
-                # check if the user moved the target ----------------------------------
-                if interface.viewer.target_moved:
-                    # update visualization of target
-                    interface.set_mocap_xyz("target", interface.viewer.target)
-                    interface.viewer.target_moved = False
-
                 # get arm feedback
                 feedback = interface.get_feedback()
                 hand_xyz = robot_config.Tx("EE")
@@ -368,22 +372,25 @@ def demo(backend):
                         net.pos = interface.viewer.target + net.reach["offset"]
                         net.vel = np.zeros(3)
                     else:
-                        if not np.allclose(interface.viewer.target,
-                                           interface.viewer.old_target,
-                                           atol=1e-5):
+                        if interface.viewer.target_moved:
                             net.n_timesteps = net.reach["n_timesteps"] - net.count
                             net.trajectory_planner.generate_path(
                                 position=net.pos,
                                 target_pos=interface.viewer.target + net.reach["offset"],
                             )
                         net.pos, net.vel = net.trajectory_planner.next()
-                        interface.viewer.old_target = np.copy(interface.viewer.target)
                     orient = np.zeros(3)
 
                 else:
                     error = np.linalg.norm((hand_xyz - net.target_data["approach_pos"]))
                     net.pos, net.vel = net.trajectory_planner.next()
                     orient = net.orientation_planner.next()
+
+                # check if the user moved the target ----------------------------------
+                if interface.viewer.target_moved:
+                    # update visualization of target
+                    interface.set_mocap_xyz("target", interface.viewer.target)
+                    interface.viewer.target_moved = False
 
                 target = np.hstack([net.pos, orient])
 
@@ -637,7 +644,7 @@ if __name__ == '__main__':
                         try:
                             sim.run(1e5)
                         except RestartMujoco:
-                            interface = restart_mujoco(net, interface, robot_config)
+                            interface = restart_mujoco(interface, robot_config)
 
             elif backend == "cpu":
                 with nengo.Simulator(net) as sim:
@@ -645,7 +652,7 @@ if __name__ == '__main__':
                         try:
                             sim.run(1e5)
                         except RestartMujoco:
-                            interface = restart_mujoco(net, interface, robot_config)
+                            interface = restart_mujoco(interface, robot_config)
 
         except ExitSim:
             pass
