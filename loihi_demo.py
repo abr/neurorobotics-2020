@@ -227,12 +227,6 @@ def demo(backend):
             while not ran_at_least_once or not interface.viewer.adapt:
                 ran_at_least_once = True
 
-                if net.reach_type == 'manual':
-                    net.reach_mode = interface.viewer.reach_mode
-                elif net.reach_type == 'auto':
-                    net.reach_mode = net.auto_reach_modes[net.auto_reach_index]
-                    interface.viewer.target = net.auto_targets[net.auto_target_index]
-
                 # if we've reset, make sure to maintain our previous mode (auto or manual)
                 if interface.viewer.reach_type is None:
                     interface.viewer.reach_type = net.reach_type
@@ -240,11 +234,23 @@ def demo(backend):
                 else:
                     net.reach_type = interface.viewer.reach_type
 
+                if net.reach_type == 'manual':
+                    net.reach_mode = interface.viewer.reach_mode
+                    net.auto_reach_index = 0
+                    net.auto_target_index = 0
+                elif net.reach_type == 'auto':
+                    net.reach_mode = net.auto_reach_modes[net.auto_reach_index]
+                    interface.viewer.target = net.auto_targets[net.auto_target_index]
+
                 # reset if switching to auto mode
                 if net.reach_type == 'auto' and net.old_reach_type == 'manual':
                     print('Switching to %s mode' % net.reach_type)
+                    net.auto_reach_index = 0
+                    net.auto_target_index = 0
+                    net.count = 0
                     net.old_reach_type = 'auto'
                     raise RestartMujoco()
+                net.old_reach_type = net.reach_type
 
                 if interface.viewer.exit:
                     glfw.destroy_window(interface.viewer.window)
@@ -266,8 +272,13 @@ def demo(backend):
                     if net.reach_index >= len(reach_list[net.reach_mode]):
                         if net.reach_mode != 'reach_target' and net.reach_type == 'auto':
                             net.auto_reach_index += 1
+                            if net.auto_reach_index == 3:
+                                interface.viewer.adapt = True
+                            else:
+                                interface.viewer.adapt = False
                             net.auto_target_index = 0
-                            interface.viewer.target_change = True
+                            # interface.viewer.target_moved = True
+                            #
                         interface.viewer.reach_mode = "reach_target"
                         net.reach_mode = interface.viewer.reach_mode
                         net.reach_index = -1
@@ -355,15 +366,6 @@ def demo(backend):
 
                     net.next_reach = False
                     net.count = 0
-
-
-                # # check if the user moved the target ----------------------------------
-                # if interface.viewer.target_moved:
-                #     # update visualization of target
-                #     interface.set_mocap_xyz("target", interface.viewer.target)
-                #     print('setting target vis')
-                #     print(interface.viewer.target)
-                #     interface.viewer.target_moved = False
 
                 # get arm feedback
                 feedback = interface.get_feedback()
@@ -479,6 +481,10 @@ def demo(backend):
                                 else:
                                     print('going to next reach mode')
                                     net.auto_reach_index += 1
+                                    if net.auto_reach_index == 3:
+                                        interface.viewer.adapt = True
+                                    else:
+                                        interface.viewer.adapt = False
                                     net.auto_target_index = 0
                             # otherwise, go to next target
                             else:
@@ -527,7 +533,9 @@ def demo(backend):
                     + "Dumbbell: %ikg\n"
                     % interface.model.body_mass[
                         interface.model.body_name2id("dumbbell")]
-                    + "Gravity: %s" % (interface.viewer.planet)
+                    + "Gravity: %s\n" % (interface.viewer.planet)
+                    + "Net Mode: %s\n" % net.reach_type
+                    + "Interface Mode: %s\n" % interface.viewer.reach_type
                     )
 
                 # check if the ADAPT sign should be on --------------------------------
