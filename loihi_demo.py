@@ -193,14 +193,14 @@ def demo(backend):
         net.auto_target_index = 0
         net.auto_targets = np.array([
             [-0.40,  0.50,  0.40],
-            [-0.10,  0.50,  0.50],
-            [0.39, 0.50, 0.29],
-            [ 0.39, -0.20,  0.39],
-            [ 0.09, -0.49,  0.69],
-            [ 0.10, -0.40,  0.50],
-            [-0.30, -0.49,   0.70],
-            [-0.49, -0.30,  0.70 ],
-            [-0.39, -0.20,  0.60],
+            # [-0.10,  0.50,  0.50],
+            # [0.39, 0.50, 0.29],
+            # [ 0.39, -0.20,  0.39],
+            # [ 0.09, -0.49,  0.69],
+            # [ 0.10, -0.40,  0.50],
+            # [-0.30, -0.49,   0.70],
+            # [-0.49, -0.30,  0.70 ],
+            # [-0.39, -0.20,  0.60],
             [-0.40, 0.10,  0.30]]
             )
 
@@ -231,6 +231,7 @@ def demo(backend):
                 elif net.reach_type == 'auto':
                     net.reach_mode = net.auto_reach_modes[net.auto_reach_index]
                     net.final_xyz = net.auto_targets[net.auto_target_index]
+                    interface.viewer.target = net.final_xyz
 
                 # if we've reset, make sure to maintain our previous mode (auto or manual)
                 if interface.viewer.reach_type is None:
@@ -352,6 +353,14 @@ def demo(backend):
                     net.count = 0
 
 
+                # # check if the user moved the target ----------------------------------
+                # if interface.viewer.target_moved:
+                #     # update visualization of target
+                #     interface.set_mocap_xyz("target", interface.viewer.target)
+                #     print('setting target vis')
+                #     print(interface.viewer.target)
+                #     interface.viewer.target_moved = False
+
                 # get arm feedback
                 feedback = interface.get_feedback()
                 hand_xyz = robot_config.Tx("EE")
@@ -446,44 +455,13 @@ def demo(backend):
                     else:
                         model.geom_rgba[target_geom_id] = red
 
-                if net.reach_mode != 'reach_target' or net.reach_type == 'auto':
-                    model.geom_rgba[target_geom_id] = red
-
-                    # the reason we differentiate hold and n timesteps is that hold is how
-                    # long we want to wait to allow for the action, mainly used for grasping,
-                    # whereas n_timesteps determines the number of steps in the path planner.
-                    # we check n_timesteps*2 to allow the arm to catch up to the path planner
-
-                    if net.reach["hold_timesteps"] is not None:
-                        if net.count >= net.reach["hold_timesteps"]:
+                    if net.reach_type == 'auto':
+                        #TODO: if adapting add a hold timesteps
+                        hold_timesteps = 0
+                        if error < 0.02 or net.count >= hold_timesteps + 2000:
                             net.next_reach = True
-                            print('maxed out hold timesteps')
-                            # if auto mode and reaching to target, cycle to next target,
-                            # but don't want to trigger this in auto mode for pick up
-                            if net.reach_mode == 'reach_target':
-                                # if at our last target, go to the next part of the reach
-                                if net.auto_target_index == len(net.auto_targets)-1:
-                                    # if at last part of reach, restart
-                                    if net.auto_reach_index == len(net.auto_reach_modes)-1:
-                                        net.auto_reach_index = 0
-                                        net.auto_target_index = 0
-                                        print('last part and last target, restart auto mode')
-                                        raise RestartMujoco()
-                                    else:
-                                        print('going to next reach mode')
-                                        net.auto_reach_index += 1
-                                        net.auto_target_index = 0
-                                # otherwise, go to next target
-                                else:
-                                    print('going to next target')
-                                    net.auto_target_index += 1
-                    elif net.count > net.reach["n_timesteps"] * 2 and error < 0.07:
-                        net.next_reach = True
-                        #TODO same as above, but need in both sections, maybe put in function?
-                        # if auto mode and reaching to target, cycle to next target,
-                        # but don't want to trigger this in auto mode for pick up
-                        print('maxed out timesteps')
-                        if net.reach_mode == 'reach_target':
+                            print('maxed out timesteps')
+
                             # if at our last target, go to the next part of the reach
                             if net.auto_target_index == len(net.auto_targets)-1:
                                 # if at last part of reach, restart
@@ -500,6 +478,21 @@ def demo(backend):
                             else:
                                 print('going to next target')
                                 net.auto_target_index += 1
+                                interface.viewer.target_moved = True
+
+                else:
+                    model.geom_rgba[target_geom_id] = red
+
+                    # the reason we differentiate hold and n timesteps is that hold is how
+                    # long we want to wait to allow for the action, mainly used for grasping,
+                    # whereas n_timesteps determines the number of steps in the path planner.
+                    # we check n_timesteps*2 to allow the arm to catch up to the path planner
+
+                    if net.reach["hold_timesteps"] is not None:
+                        if net.count >= net.reach["hold_timesteps"]:
+                            net.next_reach = True
+                    elif net.count > net.reach["n_timesteps"] * 2 and error < 0.07:
+                        net.next_reach = True
 
 
                 net.count += 1
