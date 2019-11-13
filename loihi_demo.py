@@ -226,12 +226,12 @@ def demo(backend):
             ran_at_least_once = False
             while not ran_at_least_once or not interface.viewer.adapt:
                 ran_at_least_once = True
+
                 if net.reach_type == 'manual':
                     net.reach_mode = interface.viewer.reach_mode
                 elif net.reach_type == 'auto':
                     net.reach_mode = net.auto_reach_modes[net.auto_reach_index]
-                    net.final_xyz = net.auto_targets[net.auto_target_index]
-                    interface.viewer.target = net.final_xyz
+                    interface.viewer.target = net.auto_targets[net.auto_target_index]
 
                 # if we've reset, make sure to maintain our previous mode (auto or manual)
                 if interface.viewer.reach_type is None:
@@ -264,9 +264,13 @@ def demo(backend):
                     print("Generating next reach")
                     net.reach_index += 1
                     if net.reach_index >= len(reach_list[net.reach_mode]):
+                        if net.reach_mode != 'reach_target' and net.reach_type == 'auto':
+                            net.auto_reach_index += 1
+                            net.auto_target_index = 0
+                            interface.viewer.target_change = True
                         interface.viewer.reach_mode = "reach_target"
                         net.reach_mode = interface.viewer.reach_mode
-                        net.reach_index = 0
+                        net.reach_index = -1
 
                     net.reach = reach_list[net.reach_mode][net.reach_index]
                     net.u_gripper_prev = np.zeros(3)
@@ -377,16 +381,18 @@ def demo(backend):
                     error = np.linalg.norm(
                         hand_xyz - interface.viewer.target + net.reach["offset"]
                     )
+                    if interface.viewer.target_moved:
+                        net.n_timesteps = net.reach["n_timesteps"] - net.count
+                        net.trajectory_planner.generate_path(
+                            position=net.pos,
+                            target_pos=interface.viewer.target + net.reach["offset"],
+                        )
+                        interface.set_mocap_xyz("target", interface.viewer.target)
+                        interface.viewer.target_moved = False
                     if error < 0.05:  # when close enough, don't use path planner
                         net.pos = interface.viewer.target + net.reach["offset"]
                         net.vel = np.zeros(3)
                     else:
-                        if interface.viewer.target_moved:
-                            net.n_timesteps = net.reach["n_timesteps"] - net.count
-                            net.trajectory_planner.generate_path(
-                                position=net.pos,
-                                target_pos=interface.viewer.target + net.reach["offset"],
-                            )
                         net.pos, net.vel = net.trajectory_planner.next()
                     orient = np.zeros(3)
 
@@ -478,7 +484,7 @@ def demo(backend):
                             else:
                                 print('going to next target')
                                 net.auto_target_index += 1
-                                interface.viewer.target_moved = True
+                            interface.viewer.target_moved = True
 
                 else:
                     model.geom_rgba[target_geom_id] = red
