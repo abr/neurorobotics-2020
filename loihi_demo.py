@@ -126,6 +126,8 @@ def demo(backend):
         return val
 
     reach_list = gen_reach_list(robot_config, object_xyz, deposit_xyz)
+    net.reach_type = 'manual'
+    interface.viewer.reach_type = net.reach_type
 
     # max grip force
     max_grip = 8
@@ -180,7 +182,29 @@ def demo(backend):
 
     with net:
 
+        net.auto_reach_modes = ([
+            'reach_target',
+            'pick_up',
+            'reach_target',
+            'reach_target'])
+        net.auto_reach_index = 0
+
+        net.auto_target_index = 0
+        net.auto_targets = np.array([
+            [-0.40,  0.50,  0.40],
+            [-0.10,  0.50,  0.50],
+            [0.39, 0.50, 0.29],
+            [ 0.39, -0.20,  0.39],
+            [ 0.09, -0.49,  0.69],
+            [ 0.10, -0.40,  0.50],
+            [-0.30, -0.49,   0.70],
+            [-0.49, -0.30,  0.70 ],
+            [-0.39, -0.20,  0.60],
+            [-0.40, 0.10,  0.30]]
+            )
+
         net.old_reach_mode = None
+        net.old_reach_type = net.reach_type
         net.reach_index = -1
         net.next_reach = False
         net.reach = None
@@ -202,7 +226,24 @@ def demo(backend):
             ran_at_least_once = False
             while not ran_at_least_once or not interface.viewer.adapt:
                 ran_at_least_once = True
-                net.reach_mode = interface.viewer.reach_mode
+                if net.reach_type == 'manual':
+                    net.reach_mode = interface.viewer.reach_mode
+                elif net.reach_type == 'auto':
+                    net.reach_mode = net.auto_reach_modes[net.auto_reach_index]
+                    net.final_xyz = net.auto_targets[net.auto_target_index]
+
+                # if we've reset, make sure to maintain our previous mode (auto or manual)
+                if interface.viewer.reach_type is None:
+                    interface.viewer.reach_type = net.reach_type
+                # if the viewer reach type is not None, then it has been updated since restart
+                else:
+                    net.reach_type = interface.viewer.reach_type
+
+                # reset if switching to auto mode
+                if net.reach_type == 'auto' and net.old_reach_type == 'manual':
+                    print('Switching to %s mode' % net.reach_type)
+                    net.old_reach_type = 'auto'
+                    raise RestartMujoco()
 
                 if interface.viewer.exit:
                     glfw.destroy_window(interface.viewer.window)
@@ -427,7 +468,8 @@ def demo(backend):
                         model.geom_rgba[target_geom_id] = green
                     else:
                         model.geom_rgba[target_geom_id] = red
-                else:
+
+                if net.reach_mode != 'reach_target' or net.reach_type == 'auto':
                     model.geom_rgba[target_geom_id] = red
 
                     # the reason we differentiate hold and n timesteps is that hold is how
@@ -438,8 +480,50 @@ def demo(backend):
                     if net.reach["hold_timesteps"] is not None:
                         if net.count >= net.reach["hold_timesteps"]:
                             net.next_reach = True
+                            print('maxed out hold timesteps')
+                            # if auto mode and reaching to target, cycle to next target,
+                            # but don't want to trigger this in auto mode for pick up
+                            if net.reach_mode == 'reach_target':
+                                # if at our last target, go to the next part of the reach
+                                if net.auto_target_index == len(net.auto_targets)-1:
+                                    # if at last part of reach, restart
+                                    if net.auto_reach_index == len(net.auto_reach_modes)-1:
+                                        net.auto_reach_index = 0
+                                        net.auto_target_index = 0
+                                        print('last part and last target, restart auto mode')
+                                        raise RestartMujoco()
+                                    else:
+                                        print('going to next reach mode')
+                                        net.auto_reach_index += 1
+                                        net.auto_target_index = 0
+                                # otherwise, go to next target
+                                else:
+                                    print('going to next target')
+                                    net.auto_target_index += 1
                     elif net.count > net.reach["n_timesteps"] * 2 and error < 0.07:
                         net.next_reach = True
+                        #TODO same as above, but need in both sections, maybe put in function?
+                        # if auto mode and reaching to target, cycle to next target,
+                        # but don't want to trigger this in auto mode for pick up
+                        print('maxed out timesteps')
+                        if net.reach_mode == 'reach_target':
+                            # if at our last target, go to the next part of the reach
+                            if net.auto_target_index == len(net.auto_targets)-1:
+                                # if at last part of reach, restart
+                                if net.auto_reach_index == len(net.auto_reach_modes)-1:
+                                    net.auto_reach_index = 0
+                                    net.auto_target_index = 0
+                                    print('last part and last target, restart auto mode')
+                                    raise RestartMujoco()
+                                else:
+                                    print('going to next reach mode')
+                                    net.auto_reach_index += 1
+                                    net.auto_target_index = 0
+                            # otherwise, go to next target
+                            else:
+                                print('going to next target')
+                                net.auto_target_index += 1
+
 
                 net.count += 1
 
