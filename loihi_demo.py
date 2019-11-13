@@ -55,11 +55,11 @@ def initialize_mujoco(robot_config):
 
     return interface
 
-def restart_mujoco(net, interface, robot_config):
+def restart_mujoco(interface, robot_config):
     interface.disconnect()
     del interface
     interface = initialize_mujoco(robot_config)
-    interface.set_mocap_xyz(name="target", xyz=net.final_xyz)
+    interface.set_mocap_xyz(name="target", xyz=interface.viewer.target)
     return interface
 
 def demo(backend):
@@ -112,20 +112,10 @@ def demo(backend):
     net.config[nengo.Ensemble].neuron_type = nengo.LIF()
 
     object_xyz = np.array([-0.5, 0.0, 0.02])
-    deposit_xyz = np.array([-0.4, 0.5, 0.4])
+    interface.viewer.target = np.array([-0.4, 0.5, 0.4])
+    interface.viewer.old_target = np.array([-0.4, 0.5, 0.4])
 
-    scale = 0.05
-    xlim = [-0.5, 0.5]
-    ylim = [-0.5, 0.5]
-    zlim = [0.0, 0.7]
-    rlim = [0.4, 1.0]
-
-    def clip(val, minimum, maximum):
-        val = max(val, minimum)
-        val = min(val, maximum)
-        return val
-
-    reach_list = gen_reach_list(robot_config, object_xyz, deposit_xyz)
+    reach_list = gen_reach_list(robot_config, object_xyz, interface.viewer.target)
     net.reach_type = 'manual'
     interface.viewer.reach_type = net.reach_type
 
@@ -173,12 +163,13 @@ def demo(backend):
     interface.set_mocap_xyz('mars_floor', [0, 0, -100])
     interface.set_mocap_xyz('jupiter_floor', [0, 0, -100])
     interface.set_mocap_xyz('ISS_floor', [0, 0, -100])
- 
+
     interface.set_mocap_xyz('earth', [1, 1, 0.5])
     interface.set_mocap_xyz('obstacle', [0, 0, -100])
     interface.set_mocap_xyz('path_planner', [0, 0, -100])
     interface.set_mocap_xyz('target_orientation', [0, 0, -100])
     interface.set_mocap_xyz('path_planner_orientation', [0, 0, -100])
+    interface.set_mocap_xyz('elbow', [0, 0, -100])
 
     with net:
 
@@ -213,9 +204,8 @@ def demo(backend):
         net.u = np.zeros(robot_config.N_JOINTS + 3)
         net.prev_planet = 'earth'
 
-        net.final_xyz = deposit_xyz
         # make the target offset from that start position
-        interface.set_mocap_xyz(name="target", xyz=net.final_xyz)
+        interface.set_mocap_xyz(name="target", xyz=interface.viewer.target)
 
         def arm_func(t, u_adapt):
             global interface
@@ -274,7 +264,7 @@ def demo(backend):
 
                     # if we're reaching to target, update with user changes
                     if net.reach_mode == "reach_target":
-                        net.reach["target_pos"] = net.final_xyz
+                        net.reach["target_pos"] = interface.viewer.target
 
                     if net.reach["target_options"] == "object":
 
@@ -351,61 +341,43 @@ def demo(backend):
                     net.next_reach = False
                     net.count = 0
 
-                # get the target location from the interface
-                net.old_final_xyz = net.final_xyz
 
                 # check if the user moved the target ----------------------------------
-                change = np.array(
-                    [
-                        interface.viewer.target_x,
-                        interface.viewer.target_y,
-                        interface.viewer.target_z,
-                    ]
-                )
-                if not np.allclose(change, 0):
-                    net.final_xyz = net.final_xyz + scale * change
-                    # check that we're within radius thresholds, if set
-                    if rlim[0] is not None:
-                        if np.linalg.norm(net.final_xyz) < rlim[0]:
-                            net.final_xyz = net.old_final_xyz
-
-                    if rlim[1] is not None:
-                        if np.linalg.norm(net.final_xyz) > rlim[1]:
-                            net.final_xyz = net.old_final_xyz
-
-                    net.final_xyz = np.array(
-                        [
-                            clip(net.final_xyz[0], xlim[0], xlim[1]),
-                            clip(net.final_xyz[1], ylim[0], ylim[1]),
-                            clip(net.final_xyz[2], zlim[0], zlim[1]),
-                        ]
-                    )
-                    interface.viewer.target_x = 0
-                    interface.viewer.target_y = 0
-                    interface.viewer.target_z = 0
+                if interface.viewer.target_moved:
                     # update visualization of target
-                    interface.set_mocap_xyz("target", net.final_xyz)
+                    interface.set_mocap_xyz("target", interface.viewer.target)
+                    interface.viewer.target_moved = False
 
                 # get arm feedback
                 feedback = interface.get_feedback()
-                hand_xyz = robot_config.Tx("EE", feedback["q"])
+                hand_xyz = robot_config.Tx("EE")
+
+                if interface.viewer.move_elbow:
+                    interface.set_mocap_xyz(
+                        'elbow', robot_config.Tx('joint2', object_type='joint'))
+                else:
+                    interface.set_mocap_xyz('elbow', [0, 0, -100])
+                interface.set_external_force('ring2', interface.viewer.elbow_force)
 
                 # update our path planner position and orientation --------------------
                 if net.reach_mode == "reach_target":
                     error = np.linalg.norm(
-                        hand_xyz - net.final_xyz + net.reach["offset"]
+                        hand_xyz - interface.viewer.target + net.reach["offset"]
                     )
                     if error < 0.05:  # when close enough, don't use path planner
-                        net.pos = net.final_xyz + net.reach["offset"]
+                        net.pos = interface.viewer.target + net.reach["offset"]
                         net.vel = np.zeros(3)
                     else:
-                        if not np.allclose(net.final_xyz, net.old_final_xyz, atol=1e-5):
+                        if not np.allclose(interface.viewer.target,
+                                           interface.viewer.old_target,
+                                           atol=1e-5):
                             net.n_timesteps = net.reach["n_timesteps"] - net.count
                             net.trajectory_planner.generate_path(
                                 position=net.pos,
-                                target_pos=net.final_xyz + net.reach["offset"],
+                                target_pos=interface.viewer.target + net.reach["offset"],
                             )
                         net.pos, net.vel = net.trajectory_planner.next()
+                        interface.viewer.old_target = np.copy(interface.viewer.target)
                     orient = np.zeros(3)
 
                 else:
@@ -424,8 +396,6 @@ def demo(backend):
                     # adaptive signal added (no signal for last joint)
                     net.u[: robot_config.N_JOINTS - 1] += u_adapt * adapt_scale
 
-                # if net.count % 500 == 0:
-                #     print('u_adapt: ', u_adapt)
                 # get our gripper command ---------------------------------------------
                 finger_q = np.array(
                     [data.qpos[model.get_joint_qpos_addr(finger)] for finger in fingers]
