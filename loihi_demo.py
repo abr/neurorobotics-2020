@@ -183,6 +183,7 @@ def demo(backend):
         net.auto_reach_index = 0
         net.auto_target_index = 0
         net.count = 0
+        net.at_target = 0
 
     with net:
 
@@ -227,6 +228,10 @@ def demo(backend):
                 if interface.viewer.exit:
                     glfw.destroy_window(interface.viewer.window)
                     raise ExitSim()
+
+                if net.demo_mode and interface.viewer.key_pressed:
+                    net.demo_mode = False
+                    interface.viewer.reach_mode_changed = True
 
                 # if switching to demo script / auto mode, reset Mujoco
                 if interface.viewer.toggle_demo:
@@ -463,34 +468,41 @@ def demo(backend):
                         # TODO: if adapting add a hold timesteps
                         hold_timesteps = 0
                         if error < 0.02 or net.count >= hold_timesteps + 2000:
-                            net.next_reach = True
-                            print("maxed out timesteps")
+                            # add to our at target counter
+                            if error < 0.02:
+                                net.at_target += 1
+                            # if we maxed out our hold + timesteps, or we've been at target
+                            if net.count >= hold_timesteps + 2000 or net.at_target > 250:
+                                net.next_reach = True
+                                print("maxed out timesteps")
 
-                            # if at our last target, go to the next part of the reach
-                            if net.auto_target_index == len(net.auto_targets) - 1:
-                                # if at last part of reach, restart
-                                if (
-                                    net.auto_reach_index
-                                    == len(net.auto_reach_modes) - 1
-                                ):
-                                    print(
-                                        "last part and last target, restart auto mode"
-                                    )
-                                    initialize_net(net)
-                                    raise RestartMujoco()
-                                else:
-                                    print("going to next reach mode")
-                                    net.auto_reach_index += 1
-                                    if net.auto_reach_index == 3:
-                                        interface.viewer.adapt = True
+                                # if at our last target, go to the next part of the reach
+                                if net.auto_target_index == len(net.auto_targets) - 1:
+                                    # if at last part of reach, restart
+                                    if (
+                                        net.auto_reach_index
+                                        == len(net.auto_reach_modes) - 1
+                                    ):
+                                        print(
+                                            "last part and last target, restart auto mode"
+                                        )
+                                        initialize_net(net)
+                                        raise RestartMujoco()
                                     else:
-                                        interface.viewer.adapt = False
-                                    net.auto_target_index = 0
-                            # otherwise, go to next target
-                            else:
-                                print("going to next target")
-                                net.auto_target_index += 1
-                            interface.viewer.target_moved = True
+                                        print("going to next reach mode")
+                                        net.auto_reach_index += 1
+                                        if net.auto_reach_index == 3:
+                                            interface.viewer.adapt = True
+                                        else:
+                                            interface.viewer.adapt = False
+                                        net.auto_target_index = 0
+                                # otherwise, go to next target
+                                else:
+                                    print("going to next target")
+                                    net.auto_target_index += 1
+                                interface.viewer.target_moved = True
+                        else:
+                            net.at_target = 0
 
                 else:
                     model.geom_rgba[target_geom_id] = red
