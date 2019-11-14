@@ -86,6 +86,41 @@ def initialize_interface(interface):
     interface.viewer.target = np.array([-0.4, 0.5, 0.4])
     interface.target_moved = True
 
+    hide_hotkeys(interface)
+
+
+offset = 0.08
+offset_x_right = np.array([offset, 0, 0])
+offset_x_left = -1 * offset_x_right
+offset_y_right = np.array([0, offset, 0])
+offset_y_left = -1 * offset_y_right
+offset_z_right = np.array([0, 0, offset])
+offset_z_left = -1 * offset_z_right
+def display_hotkeys(interface):
+    target_xyz = interface.get_xyz('target')
+    # move along x
+    interface.set_mocap_xyz("r-arrow-double", target_xyz + offset_x_right)
+    interface.set_mocap_xyz("l-arrow-double", target_xyz + offset_x_left)
+    # move along y
+    interface.set_mocap_xyz("u-arrow-double", target_xyz + offset_y_left)
+    interface.set_mocap_xyz("d-arrow-double", target_xyz + offset_y_right)
+    # move along z
+    interface.set_mocap_xyz("alt1", target_xyz + offset_z_left + offset_x_left/3)
+    interface.set_mocap_xyz("d-arrow-double2", target_xyz + offset_z_left + offset_x_right/3)
+    interface.set_mocap_xyz("alt2", target_xyz + offset_z_right + offset_x_left/3)
+    interface.set_mocap_xyz("u-arrow-double2", target_xyz + offset_z_right + offset_x_right/3)
+
+
+def hide_hotkeys(interface):
+    interface.set_mocap_xyz("alt1", [0, 0, -100])
+    interface.set_mocap_xyz("alt2", [0, 0, -100])
+    interface.set_mocap_xyz("l-arrow-double", [0, 0, -100])
+    interface.set_mocap_xyz("r-arrow-double", [0, 0, -100])
+    interface.set_mocap_xyz("u-arrow-double", [0, 0, -100])
+    interface.set_mocap_xyz("d-arrow-double", [0, 0, -100])
+    interface.set_mocap_xyz("u-arrow-double2", [0, 0, -100])
+    interface.set_mocap_xyz("d-arrow-double2", [0, 0, -100])
+
 
 def demo(backend):
     rng = np.random.RandomState(9)
@@ -245,6 +280,11 @@ def demo(backend):
                 if interface.viewer.restart_sim:
                     initialize_net(net)
                     raise RestartMujoco()
+
+                if interface.viewer.display_hotkeys:
+                    display_hotkeys(interface)
+                else:
+                    hide_hotkeys(interface)
 
                 if net.demo_mode:
                     net.reach_mode = net.auto_reach_modes[net.auto_reach_index]
