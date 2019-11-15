@@ -23,7 +23,7 @@ def gen_reach_list(robot_config, object_xyz, deposit_xyz):
             'n_timesteps': 1000,
             'grasp_pos': close_q,
             'hold_timesteps': None,
-            'offset': np.array([0, 0, 0.5]),
+            'offset': np.array([0, 0, 0.4]),
             'approach_buffer': -0.02,
             'ctrlr': osc6dof(robot_config, rest_angles),
             # 'traj_planner': second_order_path_planner,
@@ -32,7 +32,7 @@ def gen_reach_list(robot_config, object_xyz, deposit_xyz):
             'rot_wrist': rot_wrist,
             'target_options': 'object',
             'f_alpha': f_alpha_close,
-            'error_thresh': 0.05
+            'error_thresh': 0.07
             },
             # get into grasping position
             {'label': 'get into grasp position',
