@@ -71,7 +71,6 @@ def initialize_mujoco(robot_config, UI='keyboard'):
 
 
 def restart_mujoco(net, robot_config, UI):
-    target = np.copy(net.interface.viewer.target)
     net.interface.disconnect()
     glfw.destroy_window(net.interface.viewer.window)
     del net.interface
@@ -79,7 +78,8 @@ def restart_mujoco(net, robot_config, UI):
     net.interface = initialize_mujoco(robot_config, UI)
     initialize_interface(net.interface)
     net.interface.set_mocap_xyz(name="target", xyz=net.interface.viewer.target)
-    return net.interface
+    net.model = net.interface.sim.model
+    net.data = net.interface.sim.data
 
 
 def initialize_interface(interface):
@@ -291,17 +291,18 @@ def demo(backend, UI, demo_mode):
                     net.interface.viewer.reach_mode_changed = True
 
                 # if switching to demo script / auto mode, reset Mujoco
-                # if net.interface.viewer.toggle_demo:
-                #     print("Toggle demo")
-                #     net.demo_mode = not net.demo_mode
-                #     if net.demo_mode:
-                #         print("Switching to demo mode")
-                #         net.interface.viewer.restart_sim = True
-                #     net.interface.viewer.toggle_demo = False
+                if net.interface.viewer.toggle_demo:
+                    print("Toggle demo")
+                    net.demo_mode = not net.demo_mode
+                    if net.demo_mode:
+                        print("Switching to demo mode")
+                        net.interface.viewer.restart_sim = True
+                    net.interface.viewer.toggle_demo = False
 
                 if net.interface.viewer.restart_sim:
                     initialize_net(net)
-                    raise RestartMujoco()
+                    # raise RestartMujoco()
+                    restart_mujoco(net, robot_config, UI)
 
                 if net.interface.viewer.display_hotkeys:
                     display_hotkeys(net.interface)
@@ -560,9 +561,9 @@ def demo(backend, UI, demo_mode):
                                         print(
                                             "last part and last target, restart auto mode"
                                         )
-                                        # initialize_net(net)
+                                        initialize_net(net)
                                         # raise RestartMujoco()
-                                        net.demo_mode = False
+                                        restart_mujoco(net, robot_config, UI)
                                     else:
                                         print("going to next reach mode")
                                         net.auto_reach_index += 1
@@ -738,24 +739,19 @@ if __name__ == "__main__":
     # if we're running outside of Nengo GUI
     # while 1:
     net, robot_config = demo(backend, UI, demo_mode)
+    net.UI = UI
     try:
         if backend == "loihi":
             with nengo_loihi.Simulator(
                 net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
             ) as sim:
                 while 1:
-                    try:
-                        sim.run(1e5)
-                    except RestartMujoco:
-                        net.interface = restart_mujoco(net, robot_config, UI)
+                    sim.run(1e5)
 
         elif backend == "cpu":
             with nengo.Simulator(net) as sim:
                 while 1:
-                    try:
-                        sim.run(1e5)
-                    except RestartMujoco:
-                        net.interface = restart_mujoco(net, robot_config, UI)
+                    sim.run(1e5)
 
     except ExitSim:
         pass
