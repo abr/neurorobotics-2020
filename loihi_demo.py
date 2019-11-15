@@ -53,7 +53,7 @@ if len(sys.argv) > 1:
             UI = 'keyboard'
         elif arg == 'gamepad':
             UI = 'gamepad'
-        elif arg == 'True' or arg == 'true':
+        elif arg == 'demo':
             demo_mode = True
 
 print("Using %s as backend" % backend)
@@ -268,14 +268,14 @@ def demo(backend, UI, demo_mode):
         # make the target offset from that start position
         net.interface.set_mocap_xyz(name="target", xyz=net.interface.viewer.target)
         initialize_net(net)
-        net.demo_mode = False
+        net.demo_mode = demo_mode
         net.path_vis = False  # start out not displaying path planner target
         net.pos = None
 
         def arm_func(t, u_adapt):
             adapt_scale = 1
             if backend == "loihi":
-                adapt_scale = 50
+                adapt_scale = 10
 
             ran_at_least_once = False
             while not ran_at_least_once or not net.interface.viewer.adapt:
@@ -291,13 +291,13 @@ def demo(backend, UI, demo_mode):
                     net.interface.viewer.reach_mode_changed = True
 
                 # if switching to demo script / auto mode, reset Mujoco
-                if net.interface.viewer.toggle_demo:
-                    print("Toggle demo")
-                    net.demo_mode = not net.demo_mode
-                    if net.demo_mode:
-                        print("Switching to demo mode")
-                        net.interface.viewer.restart_sim = True
-                    net.interface.viewer.toggle_demo = False
+                # if net.interface.viewer.toggle_demo:
+                #     print("Toggle demo")
+                #     net.demo_mode = not net.demo_mode
+                #     if net.demo_mode:
+                #         print("Switching to demo mode")
+                #         net.interface.viewer.restart_sim = True
+                #     net.interface.viewer.toggle_demo = False
 
                 if net.interface.viewer.restart_sim:
                     initialize_net(net)
@@ -560,8 +560,9 @@ def demo(backend, UI, demo_mode):
                                         print(
                                             "last part and last target, restart auto mode"
                                         )
-                                        initialize_net(net)
-                                        raise RestartMujoco()
+                                        # initialize_net(net)
+                                        # raise RestartMujoco()
+                                        net.demo_mode = False
                                     else:
                                         print("going to next reach mode")
                                         net.auto_reach_index += 1
@@ -741,10 +742,8 @@ if __name__ == "__main__":
     net, robot_config = demo(backend, UI, demo_mode)
     try:
         if backend == "loihi":
-            # model = nengo_loihi.builder.Model(dt=0.001)
-            # model.pes_error_scale = 5
             with nengo_loihi.Simulator(
-                net, model=model, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
+                net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
             ) as sim:
                 while 1:
                     try:
