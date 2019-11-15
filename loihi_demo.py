@@ -279,7 +279,8 @@ def demo(backend, UI, demo_mode):
 
             ran_at_least_once = False
             while not ran_at_least_once or not net.interface.viewer.adapt:
-                net.interface.viewer.xbox_callback()
+                if UI == 'gamepad':
+                    net.interface.viewer.xbox_callback()
                 ran_at_least_once = True
 
                 if net.interface.viewer.exit:
