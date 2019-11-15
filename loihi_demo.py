@@ -627,17 +627,17 @@ def demo(backend, UI, demo_mode):
                     net.path_vis = viewer.path_vis
 
                 # print out information to mjviewer -----------------------------------
-                viewer.custom_print = (
-                    "%s\n" % net.reach["label"]
-                    + "Error: %.3fm\n" % error
-                    # + "Gripper toggle: %i\n" % viewer.gripper
-                    # + "Dumbbell: %i lbs\n"
-                    # convert from kg to lbs for printout
-                    # % np.round(interface.model.body_mass[dumbbell_body_id] / 2.2)
-                    # + "Gravity: %s\n" % (viewer.planet)
-                    + "Demonstration Mode: %s\n" % net.demo_mode
-                    # + "Interface Mode: %s\n" % viewer.reach_type
-                )
+                # viewer.custom_print = (
+                #     "%s\n" % net.reach["label"]
+                #     + "Error: %.3fm\n" % error
+                #     # + "Gripper toggle: %i\n" % viewer.gripper
+                #     # + "Dumbbell: %i lbs\n"
+                #     # convert from kg to lbs for printout
+                #     # % np.round(interface.model.body_mass[dumbbell_body_id] / 2.2)
+                #     # + "Gravity: %s\n" % (viewer.planet)
+                #     + "Demonstration Mode: %s\n" % net.demo_mode
+                #     # + "Interface Mode: %s\n" % viewer.reach_type
+                # )
 
                 # check if the ADAPT sign should be on --------------------------------
                 if not viewer.adapt:
