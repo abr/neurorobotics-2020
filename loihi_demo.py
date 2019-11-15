@@ -224,7 +224,7 @@ def demo(backend, UI, demo_mode):
     }
     net.bodies = ["link1", "link2", "link3", "link4", "link5", "link6", "dumbbell"]
     net.base_gravity = np.hstack((net.interface.model.opt.gravity, np.zeros(3)))
-    net.dumbbell_masses = [2.2, 4.4, 11]  # converted from 1, 5, 10 lbs
+    net.dumbbell_masses = [0.45, 1.13, 2.26]  # converted from 1, 5, 10 lbs
 
     initialize_interface(net.interface)
 
