@@ -4,6 +4,7 @@ import nengo
 import nengo_loihi
 import numpy as np
 import sys
+import time
 import timeit
 import traceback
 
@@ -49,7 +50,7 @@ def initialize_mujoco(robot_config):
     # create our Mujoco interface
     interface = Mujoco(robot_config, dt=0.001, visualize=True)
     interface.connect()
-    interface.viewer.setup_xbox_controller()
+    # interface.viewer.setup_xbox_controller()
     interface.send_target_angles(robot_config.START_ANGLES)
 
     return interface
@@ -57,9 +58,10 @@ def initialize_mujoco(robot_config):
 
 def restart_mujoco(interface, robot_config):
     target = np.copy(interface.viewer.target)
-    glfw.destroy_window(interface.viewer.window)
     interface.disconnect()
+    glfw.destroy_window(interface.viewer.window)
     del interface
+    time.sleep(.25)
     interface = initialize_mujoco(robot_config)
     initialize_interface(interface)
     interface.set_mocap_xyz(name="target", xyz=interface.viewer.target)
@@ -72,10 +74,10 @@ def initialize_interface(interface):
     interface.set_mocap_xyz("mars", [0, 0, -100])
     interface.set_mocap_xyz("jupiter", [0, 0, -100])
     interface.set_mocap_xyz("ISS", [0, 0, -100])
-    interface.set_mocap_xyz("moon_floor", [0, 0, -100])
-    interface.set_mocap_xyz("mars_floor", [0, 0, -100])
-    interface.set_mocap_xyz("jupiter_floor", [0, 0, -100])
-    interface.set_mocap_xyz("ISS_floor", [0, 0, -100])
+    # interface.set_mocap_xyz("moon_floor", [0, 0, -100])
+    # interface.set_mocap_xyz("mars_floor", [0, 0, -100])
+    # interface.set_mocap_xyz("jupiter_floor", [0, 0, -100])
+    # interface.set_mocap_xyz("ISS_floor", [0, 0, -100])
 
     interface.set_mocap_xyz("earth", [1, 1, 0.5])
     interface.set_mocap_xyz("obstacle", [0, 0, -100])
@@ -195,6 +197,9 @@ def demo(backend):
     OUTPUT_ZEROS = np.zeros(n_input + n_output)
     adapt_geom_id = model.geom_name2id("adapt")
     target_geom_id = model.geom_name2id("target")
+    net.weight_label_names = ["1lb", "2_5lb", "5lb"]
+    net.gravity_label_names = ["0N", "9_81N", "3_71N", "24_92N"]
+    dumbbell_body_id = model.body_name2id("dumbbell")
 
     net.path_vis = False  # start out not displaying path planner target
     net.gravities = {
@@ -206,6 +211,7 @@ def demo(backend):
     }
     net.bodies = ["link1", "link2", "link3", "link4", "link5", "link6", "dumbbell"]
     net.base_gravity = np.hstack((interface.model.opt.gravity, np.zeros(3)))
+    net.dumbbell_masses = [2.2, 4.4, 11]  # converted from 1, 5, 10 lbs
 
     initialize_interface(interface)
 
@@ -220,6 +226,7 @@ def demo(backend):
         net.auto_target_index = 0
         net.count = 0
         net.at_target = 0
+        net.dumbbell_mass_index = 0
 
     with net:
 
@@ -250,6 +257,7 @@ def demo(backend):
         initialize_net(net)
         net.demo_mode = False
         net.path_vis = False  # start out not displaying path planner target
+        net.pos = None
 
         def arm_func(t, u_adapt):
             global interface
@@ -437,6 +445,9 @@ def demo(backend):
                     interface.set_mocap_xyz("target", interface.viewer.target)
                     interface.viewer.target_moved = False
 
+                if net.pos is None:
+                    # if net.pos hasn't been set somehow make sure it's set
+                    net.pos = hand_xyz
                 target = np.hstack([net.pos, orient])
 
                 # apply force to elbow if one has been set! ---------------------------
@@ -478,11 +489,22 @@ def demo(backend):
                 gravity = net.gravities[interface.viewer.planet]
 
                 # incorporate dumbbell mass change
-                if interface.viewer.additional_mass != 0:
+                if net.dumbbell_mass_index != interface.viewer.dumbbell_mass_index:
+                    net.dumbbell_mass_index = (interface.viewer.dumbbell_mass_index
+                                               % len(net.dumbbell_masses))
+                    interface.viewer.dumbbell_mass_index = net.dumbbell_mass_index
                     interface.model.body_mass[
-                        interface.model.body_name2id("dumbbell")
-                    ] += interface.viewer.additional_mass
-                    interface.viewer.additional_mass = 0
+                        interface.model.body_name2id('dumbbell')
+                    ] = net.dumbbell_masses[net.dumbbell_mass_index]
+
+                for ii, name in enumerate(net.weight_label_names):
+                    if ii == net.dumbbell_mass_index:
+                        # model.geom_rgba[net.weight_label_ids[ii]] = adapt_on
+                        position = (np.array([0.5, 1, 0.3])
+                                    - model.body_ipos[model.body_name2id(name)])
+                        interface.set_mocap_xyz(name, position)
+                    else:
+                        interface.set_mocap_xyz(name, [0, 0, -100])
 
                 # apply our gravity term
                 for body in net.bodies:
@@ -583,10 +605,9 @@ def demo(backend):
                     "%s\n" % net.reach["label"]
                     + "Error: %.3fm\n" % error
                     + "Gripper toggle: %i\n" % interface.viewer.gripper
-                    + "Dumbbell: %ikg\n"
-                    % interface.model.body_mass[
-                        interface.model.body_name2id("dumbbell")
-                    ]
+                    + "Dumbbell: %i lbs\n"
+                    # convert from kg to lbs for printout
+                    % np.round(interface.model.body_mass[dumbbell_body_id] / 2.2)
                     + "Gravity: %s\n" % (interface.viewer.planet)
                     + "Demonstration Mode: %s\n" % net.demo_mode
                     # + "Interface Mode: %s\n" % interface.viewer.reach_type
@@ -601,15 +622,24 @@ def demo(backend):
                 if interface.viewer.planet != net.prev_planet:
                     interface.set_mocap_xyz(net.prev_planet, [0, 0, -100])
                     interface.set_mocap_xyz(interface.viewer.planet, [1, 1, 0.5])
-                    interface.set_mocap_xyz("%s_floor" % net.prev_planet, [0, 0, -100])
-                    interface.set_mocap_xyz(
-                        "%s_floor" % interface.viewer.planet, [0, 0, 0.0]
-                    )
+                    # interface.set_mocap_xyz("%s_floor" % net.prev_planet, [0, 0, -100])
+                    # interface.set_mocap_xyz(
+                    #     "%s_floor" % interface.viewer.planet, [0, 0, 0.0]
+                    # )
                     net.prev_planet = interface.viewer.planet
+
+                index = list(net.gravities.keys()).index(interface.viewer.planet)
+                for ii, name in enumerate(net.gravity_label_names):
+                    if ii == index:
+                        position = (np.array([0.5, 1, 0.45])
+                                    - model.body_ipos[model.body_name2id(name)])
+                        interface.set_mocap_xyz(name, position)
+                    else:
+                        interface.set_mocap_xyz(name, [0, 0, -100])
 
             # we made it out of the loop, so the adapt sign should be on! -------------
             model.geom_rgba[adapt_geom_id] = adapt_on
-            interface.set_mocap_xyz("brain", [0, 1, 0.2])
+            interface.set_mocap_xyz("brain", [0, 0.75, 0.2])
 
             # if adaptation is on, generate context signal for neural population ------
             feedback = interface.get_feedback()
