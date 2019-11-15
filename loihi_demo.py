@@ -603,11 +603,11 @@ def demo(backend):
                 interface.viewer.custom_print = (
                     "%s\n" % net.reach["label"]
                     + "Error: %.3fm\n" % error
-                    + "Gripper toggle: %i\n" % interface.viewer.gripper
-                    + "Dumbbell: %i lbs\n"
+                    # + "Gripper toggle: %i\n" % interface.viewer.gripper
+                    # + "Dumbbell: %i lbs\n"
                     # convert from kg to lbs for printout
-                    % np.round(interface.model.body_mass[dumbbell_body_id] / 2.2)
-                    + "Gravity: %s\n" % (interface.viewer.planet)
+                    # % np.round(interface.model.body_mass[dumbbell_body_id] / 2.2)
+                    # + "Gravity: %s\n" % (interface.viewer.planet)
                     + "Demonstration Mode: %s\n" % net.demo_mode
                     # + "Interface Mode: %s\n" % interface.viewer.reach_type
                 )
