@@ -198,16 +198,15 @@ def demo(backend):
     adapt_geom_id = model.geom_name2id("adapt")
     target_geom_id = model.geom_name2id("target")
     net.weight_label_names = ["1lb", "2_5lb", "5lb"]
-    net.gravity_label_names = ["0N", "9_81N", "3_71N", "24_92N"]
     dumbbell_body_id = model.body_name2id("dumbbell")
 
     net.path_vis = False  # start out not displaying path planner target
     net.gravities = {
-        "earth": np.array([0, 0, -9.81, 0, 0, 0]),
-        "moon": np.array([0, 0, -1.62, 0, 0, 0]),
-        "mars": np.array([0, 0, -3.71, 0, 0, 0]),
-        "jupiter": np.array([0, 0, -24.92, 0, 0, 0]),
-        "ISS": np.array([0, 0, 0, 0, 0, 0]),
+        "earth": (np.array([0, 0, -9.81, 0, 0, 0]), "9_81N"),
+        "moon": (np.array([0, 0, -1.62, 0, 0, 0]), "1_62N"),
+        "mars": (np.array([0, 0, -3.71, 0, 0, 0]), "3_71N"),
+        "jupiter": (np.array([0, 0, -24.92, 0, 0, 0]), "24_92N"),
+        "ISS": (np.array([0, 0, 0, 0, 0, 0]), "0_00N"),
     }
     net.bodies = ["link1", "link2", "link3", "link4", "link5", "link6", "dumbbell"]
     net.base_gravity = np.hstack((interface.model.opt.gravity, np.zeros(3)))
@@ -486,7 +485,7 @@ def demo(backend):
                 net.u[robot_config.N_JOINTS :] = u_gripper * interface.viewer.gripper
 
                 # set the world gravity
-                gravity = net.gravities[interface.viewer.planet]
+                gravity = net.gravities[interface.viewer.planet][0]
 
                 # incorporate dumbbell mass change
                 if net.dumbbell_mass_index != interface.viewer.dumbbell_mass_index:
@@ -500,7 +499,7 @@ def demo(backend):
                 for ii, name in enumerate(net.weight_label_names):
                     if ii == net.dumbbell_mass_index:
                         # model.geom_rgba[net.weight_label_ids[ii]] = adapt_on
-                        position = (np.array([0.5, 1, 0.3])
+                        position = (np.array([0.3, 1, 0.3])
                                     - model.body_ipos[model.body_name2id(name)])
                         interface.set_mocap_xyz(name, position)
                     else:
@@ -628,10 +627,10 @@ def demo(backend):
                     # )
                     net.prev_planet = interface.viewer.planet
 
-                index = list(net.gravities.keys()).index(interface.viewer.planet)
-                for ii, name in enumerate(net.gravity_label_names):
-                    if ii == index:
-                        position = (np.array([0.5, 1, 0.45])
+                for key in net.gravities.keys():
+                    name = net.gravities[key][1]
+                    if key == interface.viewer.planet:
+                        position = (np.array([0.3, 1, 0.45])
                                     - model.body_ipos[model.body_name2id(name)])
                         interface.set_mocap_xyz(name, position)
                     else:
