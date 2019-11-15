@@ -661,9 +661,7 @@ def demo(backend, UI, demo_mode):
                 np.hstack([feedback["q"][:5], feedback["dq"][:5]]),
             )
             training_signal = -net.reach["ctrlr"].training_signal[:5]
-            print('train: ', training_signal)
             output_signal = np.hstack([context.flatten(), training_signal.flatten()])
-            print('out: ', output_signal)
 
             # TODO: scale the training signal here
             return output_signal
