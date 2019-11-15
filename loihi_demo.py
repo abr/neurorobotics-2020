@@ -273,56 +273,65 @@ def demo(backend, UI, demo_mode):
         net.pos = None
 
         def arm_func(t, u_adapt):
+            interface = net.interface
+            viewer = interface.viewer
+            model = net.model
+            data = net.data
+
             adapt_scale = 1
             if backend == "loihi":
                 adapt_scale = 10
 
             ran_at_least_once = False
-            while not ran_at_least_once or not net.interface.viewer.adapt:
+            while not ran_at_least_once or not viewer.adapt:
                 if UI == 'gamepad':
-                    net.interface.viewer.xbox_callback()
+                    viewer.xbox_callback()
                 ran_at_least_once = True
 
-                if net.interface.viewer.exit:
-                    glfw.destroy_window(net.interface.viewer.window)
+                if viewer.exit:
+                    glfw.destroy_window(viewer.window)
                     raise ExitSim()
 
-                if net.demo_mode and net.interface.viewer.key_pressed:
+                if net.demo_mode and viewer.key_pressed:
                     net.demo_mode = False
-                    net.interface.viewer.reach_mode_changed = True
+                    viewer.reach_mode_changed = True
 
                 # if switching to demo script / auto mode, reset Mujoco
-                if net.interface.viewer.toggle_demo:
+                if viewer.toggle_demo:
                     print("Toggle demo")
                     net.demo_mode = not net.demo_mode
                     if net.demo_mode:
                         print("Switching to demo mode")
-                        net.interface.viewer.restart_sim = True
-                    net.interface.viewer.toggle_demo = False
+                        viewer.restart_sim = True
+                    viewer.toggle_demo = False
 
-                if net.interface.viewer.restart_sim:
+                if viewer.restart_sim:
                     initialize_net(net)
                     # raise RestartMujoco()
                     restart_mujoco(net, robot_config, UI)
+                    interface = net.interface
+                    viewer = interface.viewer
+                    model = net.model
+                    data = net.data
 
-                if net.interface.viewer.display_hotkeys:
-                    display_hotkeys(net.interface)
+                if viewer.display_hotkeys:
+                    display_hotkeys(interface)
                 else:
-                    hide_hotkeys(net.interface)
+                    hide_hotkeys(interface)
 
                 if net.demo_mode:
                     net.reach_mode = net.auto_reach_modes[net.auto_reach_index]
-                    net.interface.viewer.target = net.auto_targets[net.auto_target_index]
+                    viewer.target = net.auto_targets[net.auto_target_index]
                 else:
-                    net.reach_mode = net.interface.viewer.reach_mode
+                    net.reach_mode = viewer.reach_mode
                     net.auto_reach_index = 0
                     net.auto_target_index = 0
 
-                if net.interface.viewer.reach_mode_changed:
+                if viewer.reach_mode_changed:
                     print("Reach mode changed")
                     net.next_reach = True
                     net.reach_index = -1
-                    net.interface.viewer.reach_mode_changed = False
+                    viewer.reach_mode_changed = False
 
                 # if the reaching mode has changed, recalculate reaching parameters ---
                 if net.next_reach:
@@ -332,31 +341,31 @@ def demo(backend, UI, demo_mode):
                         if net.reach_mode != "reach_target" and net.demo_mode:
                             net.auto_reach_index += 1
                             if net.auto_reach_index == 3:
-                                net.interface.viewer.adapt = True
+                                viewer.adapt = True
                             else:
-                                net.interface.viewer.adapt = False
+                                viewer.adapt = False
                             net.auto_target_index = 0
-                        net.interface.viewer.reach_mode = "reach_target"
-                        net.reach_mode = net.interface.viewer.reach_mode
+                        viewer.reach_mode = "reach_target"
+                        net.reach_mode = viewer.reach_mode
                         net.reach_index = -1
 
                     net.reach = reach_list[net.reach_mode][net.reach_index]
                     net.u_gripper_prev = np.zeros(3)
 
-                    feedback = net.interface.get_feedback()
+                    feedback = interface.get_feedback()
 
                     # if we're reaching to target, update with user changes
                     if net.reach_mode == "reach_target":
-                        net.reach["target_pos"] = net.interface.viewer.target
+                        net.reach["target_pos"] = viewer.target
 
                     if net.reach["target_options"] == "object":
 
-                        net.reach["target_pos"] = net.interface.get_xyz(
+                        net.reach["target_pos"] = interface.get_xyz(
                             "handle", object_type="geom"
                         )
 
                         # target orientation should be that of an object in the environment
-                        objQ = net.interface.get_orientation("handle", object_type="geom")
+                        objQ = interface.get_orientation("handle", object_type="geom")
                         net.rotQ = calculate_rotQ()
                         quat = quaternion_multiply(net.rotQ, objQ)
                         net.startQ = np.copy(quat)
@@ -367,18 +376,18 @@ def demo(backend, UI, demo_mode):
                         net.rotQ = calculate_rotQ()
 
                         # get xyz of the hand
-                        hand_xyz = net.interface.get_xyz("EE", object_type="body")
+                        hand_xyz = interface.get_xyz("EE", object_type="body")
                         # get xyz of the object
-                        object_xyz = net.interface.get_xyz("handle", object_type="geom")
+                        object_xyz = interface.get_xyz("handle", object_type="geom")
 
                         net.reach["target"] = object_xyz + (object_xyz - hand_xyz)
 
                         # get current orientation of hand
-                        handQ_prime = net.interface.get_orientation(
+                        handQ_prime = interface.get_orientation(
                             "EE", object_type="body"
                         )
                         # get current orientation of object
-                        objQ_prime = net.interface.get_orientation(
+                        objQ_prime = interface.get_orientation(
                             "handle", object_type="geom"
                         )
 
@@ -425,24 +434,24 @@ def demo(backend, UI, demo_mode):
                     net.count = 0
 
                 # get arm feedback
-                feedback = net.interface.get_feedback()
+                feedback = interface.get_feedback()
                 hand_xyz = robot_config.Tx("EE")
 
                 # update our path planner position and orientation --------------------
                 if net.reach_mode == "reach_target":
                     error = np.linalg.norm(
-                        hand_xyz - net.interface.viewer.target + net.reach["offset"]
+                        hand_xyz - viewer.target + net.reach["offset"]
                     )
-                    if net.interface.viewer.target_moved:
+                    if viewer.target_moved:
                         net.n_timesteps = net.reach["n_timesteps"] - net.count
                         net.trajectory_planner.generate_path(
                             position=net.pos,
-                            target_pos=net.interface.viewer.target + net.reach["offset"],
+                            target_pos=viewer.target + net.reach["offset"],
                         )
-                        net.interface.set_mocap_xyz("target", net.interface.viewer.target)
-                        net.interface.viewer.target_moved = False
+                        interface.set_mocap_xyz("target", viewer.target)
+                        viewer.target_moved = False
                     if error < 0.05:  # when close enough, don't use path planner
-                        net.pos = net.interface.viewer.target + net.reach["offset"]
+                        net.pos = viewer.target + net.reach["offset"]
                         net.vel = np.zeros(3)
                     else:
                         net.pos, net.vel = net.trajectory_planner.next()
@@ -454,10 +463,10 @@ def demo(backend, UI, demo_mode):
                     orient = net.orientation_planner.next()
 
                 # check if the user moved the target ----------------------------------
-                if net.interface.viewer.target_moved:
+                if viewer.target_moved:
                     # update visualization of target
-                    net.interface.set_mocap_xyz("target", net.interface.viewer.target)
-                    net.interface.viewer.target_moved = False
+                    interface.set_mocap_xyz("target", viewer.target)
+                    viewer.target_moved = False
 
                 if net.pos is None:
                     # if net.pos hasn't been set somehow make sure it's set
@@ -465,20 +474,20 @@ def demo(backend, UI, demo_mode):
                 target = np.hstack([net.pos, orient])
 
                 # apply force to elbow if one has been set! ---------------------------
-                if net.interface.viewer.move_elbow:
-                    net.interface.set_mocap_xyz(
+                if viewer.move_elbow:
+                    interface.set_mocap_xyz(
                         "elbow", robot_config.Tx("joint2", object_type="joint")
                     )
                 else:
-                    net.interface.set_mocap_xyz("elbow", [0, 0, -100])
-                net.interface.set_external_force("ring2", net.interface.viewer.elbow_force)
+                    interface.set_mocap_xyz("elbow", [0, 0, -100])
+                interface.set_external_force("ring2", viewer.elbow_force)
 
                 # calculate our osc control signal ------------------------------------
                 net.u[: robot_config.N_JOINTS] = net.reach["ctrlr"].generate(
                     q=feedback["q"], dq=feedback["dq"], target=target
                 )
 
-                if net.interface.viewer.adapt:
+                if viewer.adapt:
                     # adaptive signal added (no signal for last joint)
                     net.u[: robot_config.N_JOINTS - 1] += u_adapt * adapt_scale
 
@@ -497,16 +506,16 @@ def demo(backend, UI, demo_mode):
                 )
                 u_gripper = np.clip(u_gripper, a_max=max_grip, a_min=-max_grip)
                 net.u_gripper_prev[:] = np.copy(u_gripper)
-                net.u[robot_config.N_JOINTS :] = u_gripper * net.interface.viewer.gripper
+                net.u[robot_config.N_JOINTS :] = u_gripper * viewer.gripper
 
                 # set the world gravity
-                gravity = net.gravities[net.interface.viewer.planet][0]
+                gravity = net.gravities[viewer.planet][0]
 
                 # incorporate dumbbell mass change
-                if net.dumbbell_mass_index != net.interface.viewer.dumbbell_mass_index:
-                    net.dumbbell_mass_index = (net.interface.viewer.dumbbell_mass_index
+                if net.dumbbell_mass_index != viewer.dumbbell_mass_index:
+                    net.dumbbell_mass_index = (viewer.dumbbell_mass_index
                                                % len(net.dumbbell_masses))
-                    net.interface.viewer.dumbbell_mass_index = net.dumbbell_mass_index
+                    viewer.dumbbell_mass_index = net.dumbbell_mass_index
                     net.model.body_mass[net.model.body_name2id('dumbbell')] = net.dumbbell_masses[net.dumbbell_mass_index]
 
                 for ii, name in enumerate(net.weight_label_names):
@@ -514,13 +523,13 @@ def demo(backend, UI, demo_mode):
                         # model.geom_rgba[net.weight_label_ids[ii]] = adapt_on
                         position = (np.array([0.3, 1, 0.3])
                                     - net.model.body_ipos[net.model.body_name2id(name)])
-                        net.interface.set_mocap_xyz(name, position)
+                        interface.set_mocap_xyz(name, position)
                     else:
-                        net.interface.set_mocap_xyz(name, [0, 0, -100])
+                        interface.set_mocap_xyz(name, [0, 0, -100])
 
                 # apply our gravity term
                 for body in net.bodies:
-                    net.interface.set_external_force(
+                    interface.set_external_force(
                         body,
                         (
                             (gravity - net.base_gravity)
@@ -531,7 +540,7 @@ def demo(backend, UI, demo_mode):
                     )
 
                 # send to mujoco, stepping the sim forward
-                net.interface.send_forces(net.u)
+                interface.send_forces(net.u)
 
                 # ----------------
                 if net.reach_mode == "reach_target":
@@ -565,19 +574,23 @@ def demo(backend, UI, demo_mode):
                                         initialize_net(net)
                                         # raise RestartMujoco()
                                         restart_mujoco(net, robot_config, UI)
+                                        interface = net.interface
+                                        viewer = interface.viewer
+                                        model = net.model
+                                        data = net.data
                                     else:
                                         print("going to next reach mode")
                                         net.auto_reach_index += 1
                                         if net.auto_reach_index == 3:
-                                            net.interface.viewer.adapt = True
+                                            viewer.adapt = True
                                         else:
-                                            net.interface.viewer.adapt = False
+                                            viewer.adapt = False
                                         net.auto_target_index = 0
                                 # otherwise, go to next target
                                 else:
                                     print("going to next target")
                                     net.auto_target_index += 1
-                                net.interface.viewer.target_moved = True
+                                viewer.target_moved = True
                         else:
                             net.at_target = 0
 
@@ -598,64 +611,64 @@ def demo(backend, UI, demo_mode):
                 net.count += 1
 
                 # toggle the path planner visualization -------------------------------
-                if net.path_vis or net.path_vis != net.interface.viewer.path_vis:
-                    if net.interface.viewer.path_vis:
-                        net.interface.set_mocap_xyz("path_planner_orientation", target[:3])
-                        net.interface.set_mocap_orientation(
+                if net.path_vis or net.path_vis != viewer.path_vis:
+                    if viewer.path_vis:
+                        interface.set_mocap_xyz("path_planner_orientation", target[:3])
+                        interface.set_mocap_orientation(
                             "path_planner_orientation",
                             quaternion_from_euler(
                                 orient[0], orient[1], orient[2], "rxyz"
                             ),
                         )
                     else:
-                        net.interface.set_mocap_xyz(
+                        interface.set_mocap_xyz(
                             "path_planner_orientation", np.array([0, 0, -100])
                         )
-                    net.path_vis = net.interface.viewer.path_vis
+                    net.path_vis = viewer.path_vis
 
                 # print out information to mjviewer -----------------------------------
-                net.interface.viewer.custom_print = (
+                viewer.custom_print = (
                     "%s\n" % net.reach["label"]
                     + "Error: %.3fm\n" % error
-                    # + "Gripper toggle: %i\n" % interface.viewer.gripper
+                    # + "Gripper toggle: %i\n" % viewer.gripper
                     # + "Dumbbell: %i lbs\n"
                     # convert from kg to lbs for printout
                     # % np.round(interface.model.body_mass[dumbbell_body_id] / 2.2)
-                    # + "Gravity: %s\n" % (interface.viewer.planet)
+                    # + "Gravity: %s\n" % (viewer.planet)
                     + "Demonstration Mode: %s\n" % net.demo_mode
-                    # + "Interface Mode: %s\n" % net.interface.viewer.reach_type
+                    # + "Interface Mode: %s\n" % viewer.reach_type
                 )
 
                 # check if the ADAPT sign should be on --------------------------------
-                if not net.interface.viewer.adapt:
+                if not viewer.adapt:
                     net.model.geom_rgba[adapt_geom_id] = adapt_off
-                    net.interface.set_mocap_xyz("brain", [0, 0, -100])
+                    interface.set_mocap_xyz("brain", [0, 0, -100])
 
                 # display the planet
-                if net.interface.viewer.planet != net.prev_planet:
-                    net.interface.set_mocap_xyz(net.prev_planet, [0, 0, -100])
-                    net.interface.set_mocap_xyz(net.interface.viewer.planet, [1, 1, 0.5])
-                    # net.interface.set_mocap_xyz("%s_floor" % net.prev_planet, [0, 0, -100])
-                    # net.interface.set_mocap_xyz(
-                    #     "%s_floor" % net.interface.viewer.planet, [0, 0, 0.0]
+                if viewer.planet != net.prev_planet:
+                    interface.set_mocap_xyz(net.prev_planet, [0, 0, -100])
+                    interface.set_mocap_xyz(viewer.planet, [1, 1, 0.5])
+                    # interface.set_mocap_xyz("%s_floor" % net.prev_planet, [0, 0, -100])
+                    # interface.set_mocap_xyz(
+                    #     "%s_floor" % viewer.planet, [0, 0, 0.0]
                     # )
-                    net.prev_planet = net.interface.viewer.planet
+                    net.prev_planet = viewer.planet
 
                 for key in net.gravities.keys():
                     name = net.gravities[key][1]
-                    if key == net.interface.viewer.planet:
+                    if key == viewer.planet:
                         position = (np.array([0.3, 1, 0.45])
                                     - net.model.body_ipos[net.model.body_name2id(name)])
-                        net.interface.set_mocap_xyz(name, position)
+                        interface.set_mocap_xyz(name, position)
                     else:
-                        net.interface.set_mocap_xyz(name, [0, 0, -100])
+                        interface.set_mocap_xyz(name, [0, 0, -100])
 
             # we made it out of the loop, so the adapt sign should be on! -------------
             net.model.geom_rgba[adapt_geom_id] = adapt_on
-            net.interface.set_mocap_xyz("brain", [0, 0.75, 0.2])
+            interface.set_mocap_xyz("brain", [0, 0.75, 0.2])
 
             # if adaptation is on, generate context signal for neural population ------
-            feedback = net.interface.get_feedback()
+            feedback = interface.get_feedback()
             context = scale_inputs(
                 spherical,
                 means,
