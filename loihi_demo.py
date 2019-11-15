@@ -49,6 +49,7 @@ def initialize_mujoco(robot_config):
     # create our Mujoco interface
     interface = Mujoco(robot_config, dt=0.001, visualize=True)
     interface.connect()
+    interface.viewer.setup_xbox_controller()
     interface.send_target_angles(robot_config.START_ANGLES)
 
     return interface
@@ -258,6 +259,7 @@ def demo(backend):
 
             ran_at_least_once = False
             while not ran_at_least_once or not interface.viewer.adapt:
+                interface.viewer.xbox_callback()
                 ran_at_least_once = True
 
                 if interface.viewer.exit:
