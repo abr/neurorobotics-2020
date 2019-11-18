@@ -139,10 +139,8 @@ def display_hotkeys(interface):
     if not interface.viewer.move_elbow:
         interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.1]
         interface.set_mocap_xyz('elbow', elbow)
-        print("not moving elbow so set transparency and move")
     else:
         interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.25]
-        print('moving elbow, make ssure were not transparent')
 
 def hide_hotkeys(interface):
     hidden_xyz = [0, 0, -100]
@@ -158,10 +156,8 @@ def hide_hotkeys(interface):
     interface.set_mocap_xyz("tab", hidden_xyz)
     if interface.viewer.move_elbow:
         interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.25]
-        print('no hot keys, set elbow trans back')
     else:
         interface.set_mocap_xyz('elbow', hidden_xyz)
-        print('no hot keys, no elbow, hide it')
 
 def demo(backend, UI, demo_mode):
     rng = np.random.RandomState(9)
