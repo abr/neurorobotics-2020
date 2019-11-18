@@ -135,7 +135,7 @@ def display_hotkeys(interface):
     if not interface.viewer.adapt:
         interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("adapt")] = [0.5, 0.5, 0.5, 0.5]
     # elbow control
-    interface.set_mocap_xyz("tab", elbow + np.array([0.1, -0.1, 0]))
+    interface.set_mocap_xyz("tab", elbow + np.array([0.1, -0.1, 0.1]))
     if not interface.viewer.move_elbow:
         interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.1]
         interface.set_mocap_xyz('elbow', elbow)
