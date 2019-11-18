@@ -106,6 +106,7 @@ def initialize_interface(interface):
     hide_hotkeys(interface)
 
 
+hidden_xyz = [0, 0, -100]
 offset = 0.08
 offset_x_right = np.array([offset, 0, 0])
 offset_x_left = -1 * offset_x_right
@@ -114,7 +115,12 @@ offset_y_left = -1 * offset_y_right
 offset_z_right = np.array([0, 0, offset])
 offset_z_left = -1 * offset_z_right
 def display_hotkeys(interface):
+    #TODO: make sure the hotkey functions only run when changing hotkey state on/off
     elbow = robot_config.Tx("joint2", object_type="joint")
+    hand_xyz = interface.get_xyz("EE", object_type="body")
+    #TODO do we want to hard code some of these? not sure of the computational load to calculate them
+    dumbbell_xyz = interface.get_xyz("dumbbell", object_type='body')
+    dumbbell_drop_off = interface.get_xyz("dumbbell_stand2", object_type='body')
     if interface.viewer.move_elbow:
         target_xyz = elbow
     else:
@@ -141,9 +147,18 @@ def display_hotkeys(interface):
         interface.set_mocap_xyz('elbow', elbow)
     else:
         interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.25]
+    # arm mode keys
+    #interface.set_mocap_xyz("F1", hidden_xyz)
+    if np.linalg.norm(dumbbell_xyz - hand_xyz) < 0.05:
+        # dumbbell in hand, show drop off key
+        interface.set_mocap_xyz("F3", dumbbell_drop_off + np.array([0.11, 0, 0]))
+        interface.set_mocap_xyz("F2", hidden_xyz)
+    else:
+        # dumbbell far from hand, show pick up key
+        interface.set_mocap_xyz("F2", dumbbell_xyz + np.array([-0.1, 0, 0.1]))
+        interface.set_mocap_xyz("F3", hidden_xyz)
 
 def hide_hotkeys(interface):
-    hidden_xyz = [0, 0, -100]
     interface.set_mocap_xyz("alt1", hidden_xyz)
     interface.set_mocap_xyz("alt2", hidden_xyz)
     interface.set_mocap_xyz("l-arrow-double", hidden_xyz)
@@ -158,6 +173,9 @@ def hide_hotkeys(interface):
         interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.25]
     else:
         interface.set_mocap_xyz('elbow', hidden_xyz)
+    interface.set_mocap_xyz("F1", hidden_xyz)
+    interface.set_mocap_xyz("F2", hidden_xyz)
+    interface.set_mocap_xyz("F3", hidden_xyz)
 
 def demo(backend, UI, demo_mode):
     rng = np.random.RandomState(9)
