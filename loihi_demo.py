@@ -114,7 +114,11 @@ offset_y_left = -1 * offset_y_right
 offset_z_right = np.array([0, 0, offset])
 offset_z_left = -1 * offset_z_right
 def display_hotkeys(interface):
-    target_xyz = interface.get_xyz('target')
+    elbow = robot_config.Tx("joint2", object_type="joint")
+    if interface.viewer.move_elbow:
+        target_xyz = elbow
+    else:
+        target_xyz = interface.get_xyz('target')
     # move along x
     interface.set_mocap_xyz("r-arrow-double", target_xyz + offset_x_right)
     interface.set_mocap_xyz("l-arrow-double", target_xyz + offset_x_left)
@@ -126,18 +130,38 @@ def display_hotkeys(interface):
     interface.set_mocap_xyz("d-arrow-double2", target_xyz + offset_z_left + offset_x_right/3)
     interface.set_mocap_xyz("alt2", target_xyz + offset_z_right + offset_x_left/3)
     interface.set_mocap_xyz("u-arrow-double2", target_xyz + offset_z_right + offset_x_right/3)
-
+    # adaptation toggle
+    interface.set_mocap_xyz("shift", np.array([0.25, 0.75, 0.2]))
+    if not interface.viewer.adapt:
+        interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("adapt")] = [0.5, 0.5, 0.5, 0.5]
+    # elbow control
+    interface.set_mocap_xyz("tab", elbow + np.array([0.1, -0.1, 0]))
+    if not interface.viewer.move_elbow:
+        interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.1]
+        interface.set_mocap_xyz('elbow', elbow)
+        print("not moving elbow so set transparency and move")
+    else:
+        interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.25]
+        print('moving elbow, make ssure were not transparent')
 
 def hide_hotkeys(interface):
-    interface.set_mocap_xyz("alt1", [0, 0, -100])
-    interface.set_mocap_xyz("alt2", [0, 0, -100])
-    interface.set_mocap_xyz("l-arrow-double", [0, 0, -100])
-    interface.set_mocap_xyz("r-arrow-double", [0, 0, -100])
-    interface.set_mocap_xyz("u-arrow-double", [0, 0, -100])
-    interface.set_mocap_xyz("d-arrow-double", [0, 0, -100])
-    interface.set_mocap_xyz("u-arrow-double2", [0, 0, -100])
-    interface.set_mocap_xyz("d-arrow-double2", [0, 0, -100])
-
+    hidden_xyz = [0, 0, -100]
+    interface.set_mocap_xyz("alt1", hidden_xyz)
+    interface.set_mocap_xyz("alt2", hidden_xyz)
+    interface.set_mocap_xyz("l-arrow-double", hidden_xyz)
+    interface.set_mocap_xyz("r-arrow-double", hidden_xyz)
+    interface.set_mocap_xyz("u-arrow-double", hidden_xyz)
+    interface.set_mocap_xyz("d-arrow-double", hidden_xyz)
+    interface.set_mocap_xyz("u-arrow-double2", hidden_xyz)
+    interface.set_mocap_xyz("d-arrow-double2", hidden_xyz)
+    interface.set_mocap_xyz("shift", hidden_xyz)
+    interface.set_mocap_xyz("tab", hidden_xyz)
+    if interface.viewer.move_elbow:
+        interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.25]
+        print('no hot keys, set elbow trans back')
+    else:
+        interface.set_mocap_xyz('elbow', hidden_xyz)
+        print('no hot keys, no elbow, hide it')
 
 def demo(backend, UI, demo_mode):
     rng = np.random.RandomState(9)
@@ -478,7 +502,7 @@ def demo(backend, UI, demo_mode):
                     interface.set_mocap_xyz(
                         "elbow", robot_config.Tx("joint2", object_type="joint")
                     )
-                else:
+                elif not viewer.display_hotkeys:
                     interface.set_mocap_xyz("elbow", [0, 0, -100])
                 interface.set_external_force("ring2", viewer.elbow_force)
 
@@ -490,6 +514,9 @@ def demo(backend, UI, demo_mode):
                 if viewer.adapt:
                     # adaptive signal added (no signal for last joint)
                     net.u[: robot_config.N_JOINTS - 1] += u_adapt * adapt_scale
+
+                if net.count % 500 == 0:
+                    print('u:adapt: ', u_adapt)
 
                 # get our gripper command ---------------------------------------------
                 finger_q = np.array(
