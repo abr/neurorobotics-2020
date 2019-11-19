@@ -114,7 +114,20 @@ offset_y_right = np.array([0, offset, 0])
 offset_y_left = -1 * offset_y_right
 offset_z_right = np.array([0, 0, offset])
 offset_z_left = -1 * offset_z_right
+planets = ['mars', 'earth', 'ISS', 'moon', 'jupiter']
+planet_locs = np.array([
+    [1, 1, 0.5],
+    [1.5, 1.5, 0.7],
+    [1.5, 2.0, 0.9],
+    [0.5, 2.0, 0.9],
+    [0.5, 1.5, 0.7],
+    # [1.2, 1.4, 0.5],
+    # [0.8, 1.4, 0.5],
+    # [0.8, 1.2, 0.5]
+    ])
+
 def display_hotkeys(interface):
+    print('displaying hotkeys')
     #TODO: make sure the hotkey functions only run when changing hotkey state on/off
     elbow = robot_config.Tx("joint2", object_type="joint")
     hand_xyz = interface.get_xyz("EE", object_type="body")
@@ -158,6 +171,13 @@ def display_hotkeys(interface):
         interface.set_mocap_xyz("F2", dumbbell_xyz + np.array([-0.1, 0, 0.1]))
         interface.set_mocap_xyz("F3", hidden_xyz)
 
+    current_planet_index = planets.index(interface.viewer.planet)
+    print(interface.viewer.planet)
+    for ii in range(0, len(planets)):
+        index = (current_planet_index + ii) % len(planets)
+        interface.set_mocap_xyz(planets[index], planet_locs[ii])
+
+
 def hide_hotkeys(interface):
     interface.set_mocap_xyz("alt1", hidden_xyz)
     interface.set_mocap_xyz("alt2", hidden_xyz)
@@ -176,6 +196,11 @@ def hide_hotkeys(interface):
     interface.set_mocap_xyz("F1", hidden_xyz)
     interface.set_mocap_xyz("F2", hidden_xyz)
     interface.set_mocap_xyz("F3", hidden_xyz)
+    for planet in planets:
+        if planet != interface.viewer.planet:
+            interface.set_mocap_xyz(planet, hidden_xyz)
+        else:
+            interface.set_mocap_xyz(planet, planet_locs[0])
 
 def demo(backend, UI, demo_mode):
     rng = np.random.RandomState(9)
@@ -254,11 +279,11 @@ def demo(backend, UI, demo_mode):
 
     net.path_vis = False  # start out not displaying path planner target
     net.gravities = {
-        "earth": (np.array([0, 0, -9.81, 0, 0, 0]), "9_81N"),
-        "moon": (np.array([0, 0, -1.62, 0, 0, 0]), "1_62N"),
         "mars": (np.array([0, 0, -3.71, 0, 0, 0]), "3_71N"),
-        "jupiter": (np.array([0, 0, -24.92, 0, 0, 0]), "24_92N"),
+        "earth": (np.array([0, 0, -9.81, 0, 0, 0]), "9_81N"),
         "ISS": (np.array([0, 0, 0, 0, 0, 0]), "0_00N"),
+        "moon": (np.array([0, 0, -1.62, 0, 0, 0]), "1_62N"),
+        "jupiter": (np.array([0, 0, -24.92, 0, 0, 0]), "24_92N"),
     }
     net.bodies = ["link1", "link2", "link3", "link4", "link5", "link6", "dumbbell"]
     net.base_gravity = np.hstack((net.interface.model.opt.gravity, np.zeros(3)))
@@ -516,6 +541,7 @@ def demo(backend, UI, demo_mode):
                     interface.set_mocap_xyz(
                         "elbow", robot_config.Tx("joint2", object_type="joint")
                     )
+                # hide the elbow sphere, but if we're showing hotkeys leave it visible
                 elif not viewer.display_hotkeys:
                     interface.set_mocap_xyz("elbow", [0, 0, -100])
                 interface.set_external_force("ring2", viewer.elbow_force)
