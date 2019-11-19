@@ -69,6 +69,7 @@ def initialize_mujoco(robot_config, UI='keyboard'):
     interface.set_mocap_xyz('adapt', [0, 0.75, 0])
     interface.set_mocap_xyz('gravity', [-0.15, 1, 0.398])
     interface.set_mocap_xyz('weight', [-0.14, 1.015, 0.3])
+    interface.set_mocap_xyz('main_logo', [-0.6, 1, 0.375])
 
     return interface
 
@@ -174,15 +175,21 @@ def display_hotkeys(interface):
         interface.set_mocap_xyz("F3", hidden_xyz)
 
     current_planet_index = planets.index(interface.viewer.planet)
-    print(interface.viewer.planet)
     for ii in range(0, len(planets)):
         index = (current_planet_index + ii) % len(planets)
         interface.set_mocap_xyz(planets[index], planet_locs[ii])
 
-    interface.set_mocap_xyz("a", planet_locs[0] + np.array([-0.35, 0, 0.15]))
-    interface.set_mocap_xyz("d", planet_locs[0] + np.array([0.35, 0, 0.15]))
-    interface.set_mocap_xyz("w", np.array([0.5, 1, 0.3]))
+    interface.set_mocap_xyz("a", np.array([0.1, 1, 0.45]))
+    interface.set_mocap_xyz("d", np.array([0.6, 1, 0.45]))
+    interface.set_mocap_xyz("w", np.array([0.6, 1, 0.3]))
     interface.set_mocap_xyz("s", np.array([0.1, 1, 0.3]))
+
+    interface.set_mocap_xyz('exit', np.array([-0.5, -0.625, 0]))
+    interface.set_mocap_xyz("esc", np.array([-0.5, -0.55, 0.1]))
+    interface.set_mocap_xyz('restart', np.array([0.0, -0.625, 0]))
+    interface.set_mocap_xyz("F5", np.array([0.0, -0.55, 0.1]))
+    interface.set_mocap_xyz('demo_mode', np.array([0.5, -0.625, 0]))
+    interface.set_mocap_xyz("enter", np.array([0.5, -0.55, 0.1]))
 
 def hide_hotkeys(interface):
     interface.set_mocap_xyz("alt1", hidden_xyz)
@@ -194,7 +201,12 @@ def hide_hotkeys(interface):
     interface.set_mocap_xyz("u-arrow-double2", hidden_xyz)
     interface.set_mocap_xyz("d-arrow-double2", hidden_xyz)
     interface.set_mocap_xyz("shift", hidden_xyz)
+    interface.set_mocap_xyz("enter", hidden_xyz)
+    interface.set_mocap_xyz("demo_mode", hidden_xyz)
+    interface.set_mocap_xyz("esc", hidden_xyz)
+    interface.set_mocap_xyz("exit", hidden_xyz)
     interface.set_mocap_xyz("tab", hidden_xyz)
+
     if interface.viewer.move_elbow:
         interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.25]
     else:
@@ -202,6 +214,9 @@ def hide_hotkeys(interface):
     interface.set_mocap_xyz("F1", hidden_xyz)
     interface.set_mocap_xyz("F2", hidden_xyz)
     interface.set_mocap_xyz("F3", hidden_xyz)
+    interface.set_mocap_xyz("F5", hidden_xyz)
+    interface.set_mocap_xyz("restart", hidden_xyz)
+
     for planet in planets:
         if planet != interface.viewer.planet:
             interface.set_mocap_xyz(planet, hidden_xyz)
@@ -599,7 +614,7 @@ def demo(backend, UI, demo_mode):
                 for ii, name in enumerate(net.weight_label_names):
                     if ii == net.dumbbell_mass_index:
                         # model.geom_rgba[net.weight_label_ids[ii]] = adapt_on
-                        position = (np.array([0.3, 1, 0.3])
+                        position = (np.array([0.35, 1, 0.3])
                                     - net.model.body_ipos[net.model.body_name2id(name)])
                         interface.set_mocap_xyz(name, position)
                     else:
@@ -735,7 +750,7 @@ def demo(backend, UI, demo_mode):
                 for key in net.gravities.keys():
                     name = net.gravities[key][1]
                     if key == viewer.planet:
-                        position = (np.array([0.3, 1, 0.45])
+                        position = (np.array([0.35, 1, 0.45])
                                     - net.model.body_ipos[net.model.body_name2id(name)])
                         interface.set_mocap_xyz(name, position)
                     else:
