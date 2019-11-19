@@ -66,6 +66,9 @@ def initialize_mujoco(robot_config, UI='keyboard'):
     if UI == 'gamepad':
         interface.viewer.setup_xbox_controller()
     interface.send_target_angles(robot_config.START_ANGLES)
+    interface.set_mocap_xyz('adapt', [0, 0.75, 0])
+    interface.set_mocap_xyz('gravity', [-0.15, 1, 0.398])
+    interface.set_mocap_xyz('weight', [-0.14, 1.015, 0.3])
 
     return interface
 
@@ -127,7 +130,6 @@ planet_locs = np.array([
     ])
 
 def display_hotkeys(interface):
-    print('displaying hotkeys')
     #TODO: make sure the hotkey functions only run when changing hotkey state on/off
     elbow = robot_config.Tx("joint2", object_type="joint")
     hand_xyz = interface.get_xyz("EE", object_type="body")
@@ -177,6 +179,8 @@ def display_hotkeys(interface):
         index = (current_planet_index + ii) % len(planets)
         interface.set_mocap_xyz(planets[index], planet_locs[ii])
 
+    interface.set_mocap_xyz("a", planet_locs[0] + np.array([-0.35, 0, 0.15]))
+    interface.set_mocap_xyz("d", planet_locs[0] + np.array([0.35, 0, 0.15]))
 
 def hide_hotkeys(interface):
     interface.set_mocap_xyz("alt1", hidden_xyz)
@@ -201,6 +205,11 @@ def hide_hotkeys(interface):
             interface.set_mocap_xyz(planet, hidden_xyz)
         else:
             interface.set_mocap_xyz(planet, planet_locs[0])
+
+    interface.set_mocap_xyz("w", hidden_xyz)
+    interface.set_mocap_xyz("a", hidden_xyz)
+    interface.set_mocap_xyz("s", hidden_xyz)
+    interface.set_mocap_xyz("d", hidden_xyz)
 
 def demo(backend, UI, demo_mode):
     rng = np.random.RandomState(9)
