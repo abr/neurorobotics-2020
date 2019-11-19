@@ -181,6 +181,8 @@ def display_hotkeys(interface):
 
     interface.set_mocap_xyz("a", planet_locs[0] + np.array([-0.35, 0, 0.15]))
     interface.set_mocap_xyz("d", planet_locs[0] + np.array([0.35, 0, 0.15]))
+    interface.set_mocap_xyz("w", np.array([0.5, 1, 0.3]))
+    interface.set_mocap_xyz("s", np.array([0.1, 1, 0.3]))
 
 def hide_hotkeys(interface):
     interface.set_mocap_xyz("alt1", hidden_xyz)
