@@ -58,6 +58,35 @@ if len(sys.argv) > 1:
 
 print("Using %s as backend" % backend)
 
+key_mapping = {
+        'keyboard': {
+            # target and elbow movement
+            'x_plus': 'r-arrow-double',
+            'x_minus': 'l-arrow-double',
+            'y_plus': 'u-arrow-double',
+            'y_minus': 'd-arrow-double',
+            'z_plus': ['alt1', 'u-arrow-double2'],
+            'z_minus': ['alt2', 'd-arrow-double2'],
+            # feature keys
+            'adapt': 'shift',
+            'demo_mode': {'key': 'enter', 'icon': 'demo_mode'},
+            'exit': {'key': 'esc', 'icon': 'exit'},
+            'restart': {'key': 'F5', 'icon': 'restart'},
+            'elbow': 'tab',
+            # follow, pick up, drop off
+            'reach_target': 'F1',
+            'pick_up': 'F2',
+            'drop_off': 'F3',
+            # parameter cycling
+            'mass_up': 'w',
+            'mass_down': 's',
+            'next_planet': 'd',
+            'prev_planet': 'a'
+            }
+        # 'gamepad': {
+        #     }
+        }
+
 
 def initialize_mujoco(robot_config, UI='keyboard'):
     # create our Mujoco interface
@@ -129,8 +158,31 @@ planet_locs = np.array([
     # [0.8, 1.4, 0.5],
     # [0.8, 1.2, 0.5]
     ])
-
+# # target and elbow movement
+#             'x_plus': 'r_arrow_double',
+#             'x_minus': 'l_arrow_double',
+#             'y_plus': 'u_arrow_double',
+#             'y_minus': 'd_arrow_double',
+#             'z_plus': ['alt1', 'u_arrow_double2'],
+#             'z_minus': ['alt2', 'd_arrow_double2'],
+#             # feature keys
+#             'adapt': 'shift',
+#             'demo': ['enter', 'demo_mode'],
+#             'exit': ['esc', 'exit'],
+#             'restart': ['F5', 'restart'],
+#             'elbow': 'tab',
+#             # follow, pick up, drop off
+#             'reach_target': 'F1',
+#             'pick_up': 'F2',
+#             'drop_off': 'F3',
+#             # parameter cycling
+#             'mass_up': 'w',
+#             'mass_down': 's',
+#             'next_planet': 'd',
+#             'prev_planet': 'a'
+#             }
 def display_hotkeys(interface):
+    mapping = key_mapping[UI]
     #TODO: make sure the hotkey functions only run when changing hotkey state on/off
     elbow = robot_config.Tx("joint2", object_type="joint")
     hand_xyz = interface.get_xyz("EE", object_type="body")
@@ -142,22 +194,22 @@ def display_hotkeys(interface):
     else:
         target_xyz = interface.get_xyz('target')
     # move along x
-    interface.set_mocap_xyz("r-arrow-double", target_xyz + offset_x_right)
-    interface.set_mocap_xyz("l-arrow-double", target_xyz + offset_x_left)
+    interface.set_mocap_xyz(mapping["x_plus"], target_xyz + offset_x_right)
+    interface.set_mocap_xyz(mapping["x_minus"], target_xyz + offset_x_left)
     # move along y
-    interface.set_mocap_xyz("u-arrow-double", target_xyz + offset_y_left)
-    interface.set_mocap_xyz("d-arrow-double", target_xyz + offset_y_right)
+    interface.set_mocap_xyz(mapping["y_plus"], target_xyz + offset_y_left)
+    interface.set_mocap_xyz(mapping["y_minus"], target_xyz + offset_y_right)
     # move along z
-    interface.set_mocap_xyz("alt1", target_xyz + offset_z_left + offset_x_left/3)
-    interface.set_mocap_xyz("d-arrow-double2", target_xyz + offset_z_left + offset_x_right/3)
-    interface.set_mocap_xyz("alt2", target_xyz + offset_z_right + offset_x_left/3)
-    interface.set_mocap_xyz("u-arrow-double2", target_xyz + offset_z_right + offset_x_right/3)
+    interface.set_mocap_xyz(mapping["z_minus"][0], target_xyz + offset_z_left + offset_x_left/3)
+    interface.set_mocap_xyz(mapping["z_minus"][1], target_xyz + offset_z_left + offset_x_right/3)
+    interface.set_mocap_xyz(mapping["z_plus"][0], target_xyz + offset_z_right + offset_x_left/3)
+    interface.set_mocap_xyz(mapping['z_plus'][1], target_xyz + offset_z_right + offset_x_right/3)
     # adaptation toggle
-    interface.set_mocap_xyz("shift", np.array([0.25, 0.75, 0.2]))
+    interface.set_mocap_xyz(mapping['adapt'], np.array([0.25, 0.75, 0.2]))
     if not interface.viewer.adapt:
         interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("adapt")] = [0.5, 0.5, 0.5, 0.5]
     # elbow control
-    interface.set_mocap_xyz("tab", elbow + np.array([0.1, -0.1, 0.1]))
+    interface.set_mocap_xyz(mapping['elbow'], elbow + np.array([0.1, -0.1, 0.1]))
     if not interface.viewer.move_elbow:
         interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.1]
         interface.set_mocap_xyz('elbow', elbow)
@@ -167,12 +219,12 @@ def display_hotkeys(interface):
     #interface.set_mocap_xyz("F1", hidden_xyz)
     if np.linalg.norm(dumbbell_xyz - hand_xyz) < 0.05:
         # dumbbell in hand, show drop off key
-        interface.set_mocap_xyz("F3", dumbbell_drop_off + np.array([0.11, 0, 0]))
-        interface.set_mocap_xyz("F2", hidden_xyz)
+        interface.set_mocap_xyz(mapping['drop_off'], dumbbell_drop_off + np.array([0.11, 0, 0]))
+        interface.set_mocap_xyz(mapping['pick_up'], hidden_xyz)
     else:
         # dumbbell far from hand, show pick up key
-        interface.set_mocap_xyz("F2", dumbbell_xyz + np.array([-0.1, 0, 0.1]))
-        interface.set_mocap_xyz("F3", hidden_xyz)
+        interface.set_mocap_xyz(mapping['pick_up'], dumbbell_xyz + np.array([-0.1, 0, 0.1]))
+        interface.set_mocap_xyz(mapping['drop_off'], hidden_xyz)
 
     current_planet_index = planets.index(interface.viewer.planet)
     for ii in range(0, len(planets)):
@@ -183,43 +235,34 @@ def display_hotkeys(interface):
         else:
             interface.sim.model.geom_rgba[interface.sim.model.geom_name2id(planets[ii])] = [1, 1, 1, 1]
 
-    interface.set_mocap_xyz("a", np.array([0.1, 1, 0.45]))
-    interface.set_mocap_xyz("d", np.array([0.6, 1, 0.45]))
-    interface.set_mocap_xyz("w", np.array([0.6, 1, 0.3]))
-    interface.set_mocap_xyz("s", np.array([0.1, 1, 0.3]))
+    interface.set_mocap_xyz(mapping['prev_planet'], np.array([0.1, 1, 0.45]))
+    interface.set_mocap_xyz(mapping['next_planet'], np.array([0.6, 1, 0.45]))
+    interface.set_mocap_xyz(mapping['mass_up'], np.array([0.6, 1, 0.3]))
+    interface.set_mocap_xyz(mapping['mass_down'], np.array([0.1, 1, 0.3]))
 
-    interface.set_mocap_xyz('exit', np.array([-0.5, -0.625, 0]))
-    interface.set_mocap_xyz("esc", np.array([-0.5, -0.55, 0.1]))
-    interface.set_mocap_xyz('restart', np.array([0.0, -0.625, 0]))
-    interface.set_mocap_xyz("F5", np.array([0.0, -0.55, 0.1]))
-    interface.set_mocap_xyz('demo_mode', np.array([0.5, -0.625, 0]))
-    interface.set_mocap_xyz("enter", np.array([0.5, -0.55, 0.1]))
+    interface.set_mocap_xyz(mapping['exit']['icon'], np.array([-0.5, -0.625, 0]))
+    interface.set_mocap_xyz(mapping['exit']['key'], np.array([-0.5, -0.55, 0.1]))
+    interface.set_mocap_xyz(mapping['restart']['icon'], np.array([0.0, -0.625, 0]))
+    interface.set_mocap_xyz(mapping['restart']['key'], np.array([0.0, -0.55, 0.1]))
+    interface.set_mocap_xyz(mapping['demo_mode']['icon'], np.array([0.5, -0.625, 0]))
+    interface.set_mocap_xyz(mapping['demo_mode']['key'], np.array([0.5, -0.55, 0.1]))
 
 def hide_hotkeys(interface):
-    interface.set_mocap_xyz("alt1", hidden_xyz)
-    interface.set_mocap_xyz("alt2", hidden_xyz)
-    interface.set_mocap_xyz("l-arrow-double", hidden_xyz)
-    interface.set_mocap_xyz("r-arrow-double", hidden_xyz)
-    interface.set_mocap_xyz("u-arrow-double", hidden_xyz)
-    interface.set_mocap_xyz("d-arrow-double", hidden_xyz)
-    interface.set_mocap_xyz("u-arrow-double2", hidden_xyz)
-    interface.set_mocap_xyz("d-arrow-double2", hidden_xyz)
-    interface.set_mocap_xyz("shift", hidden_xyz)
-    interface.set_mocap_xyz("enter", hidden_xyz)
-    interface.set_mocap_xyz("demo_mode", hidden_xyz)
-    interface.set_mocap_xyz("esc", hidden_xyz)
-    interface.set_mocap_xyz("exit", hidden_xyz)
-    interface.set_mocap_xyz("tab", hidden_xyz)
+    mapping = key_mapping[UI]
+    for key in mapping:
+        if isinstance(mapping[key], list):
+            for sub_key in mapping[key]:
+                interface.set_mocap_xyz(sub_key, hidden_xyz)
+        elif isinstance(mapping[key], dict):
+            for sub_key in mapping[key]:
+                interface.set_mocap_xyz(mapping[key][sub_key], hidden_xyz)
+        else:
+            interface.set_mocap_xyz(mapping[key], hidden_xyz)
 
     if interface.viewer.move_elbow:
         interface.sim.model.geom_rgba[interface.sim.model.geom_name2id("elbow")] = [0, 1, 1, 0.25]
     else:
         interface.set_mocap_xyz('elbow', hidden_xyz)
-    interface.set_mocap_xyz("F1", hidden_xyz)
-    interface.set_mocap_xyz("F2", hidden_xyz)
-    interface.set_mocap_xyz("F3", hidden_xyz)
-    interface.set_mocap_xyz("F5", hidden_xyz)
-    interface.set_mocap_xyz("restart", hidden_xyz)
 
     for planet in planets:
         if planet != interface.viewer.planet:
@@ -229,10 +272,6 @@ def hide_hotkeys(interface):
             interface.set_mocap_xyz(planet, planet_locs[0])
             interface.sim.model.geom_rgba[interface.sim.model.geom_name2id(planet)] = [1, 1, 1, 1]
 
-    interface.set_mocap_xyz("w", hidden_xyz)
-    interface.set_mocap_xyz("a", hidden_xyz)
-    interface.set_mocap_xyz("s", hidden_xyz)
-    interface.set_mocap_xyz("d", hidden_xyz)
 
 def demo(backend, UI, demo_mode):
     rng = np.random.RandomState(9)
