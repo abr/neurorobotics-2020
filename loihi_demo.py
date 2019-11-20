@@ -81,7 +81,8 @@ key_mapping = {
             'mass_up': 'w',
             'mass_down': 's',
             'next_planet': 'd',
-            'prev_planet': 'a'
+            'prev_planet': 'a',
+            'info': {'key': 'space', 'icon': 'info'}
             },
         'gamepad': {
             # target and elbow movement
@@ -105,7 +106,8 @@ key_mapping = {
             'mass_up': 'u_dpad',
             'mass_down': 'd_dpad',
             'next_planet': 'r_dpad',
-            'prev_planet': 'l_dpad'
+            'prev_planet': 'l_dpad',
+            'info': {'key': 'xbox_start', 'icon': 'info'}
             }
         }
 
@@ -125,6 +127,7 @@ def initialize_mujoco(robot_config, UI='keyboard'):
     # hide the keys for the other UIs
     for controller in key_mapping:
         if controller != UI:
+            print('hiding %s keys'%controller)
             hide_hotkeys(interface, controller)
 
     return interface
@@ -192,6 +195,9 @@ planet_locs = np.array([
 
 def display_hotkeys(interface):
     mapping = key_mapping[UI]
+    interface.set_mocap_xyz(mapping['info']['key'], [0.7, -0.6, 0.1])
+    interface.set_mocap_xyz(mapping['info']['icon'], [0.7, -0.7, 0.01])
+
     #TODO: make sure the hotkey functions only run when changing hotkey state on/off
     elbow = robot_config.Tx("joint2", object_type="joint")
     hand_xyz = interface.get_xyz("EE", object_type="body")
@@ -284,12 +290,12 @@ def display_hotkeys(interface):
     interface.set_mocap_xyz(mapping['mass_down'], np.array([0.1, 1, 0.3]))
 
     # changing demo modes
-    interface.set_mocap_xyz(mapping['exit']['icon'], np.array([-0.5, -0.625, 0]))
-    interface.set_mocap_xyz(mapping['exit']['key'], np.array([-0.5, -0.55, 0.1]))
+    interface.set_mocap_xyz(mapping['exit']['icon'], np.array([-0.45, -0.625, 0]))
+    interface.set_mocap_xyz(mapping['exit']['key'], np.array([-0.45, -0.55, 0.1]))
     interface.set_mocap_xyz(mapping['restart']['icon'], np.array([0.0, -0.625, 0]))
     interface.set_mocap_xyz(mapping['restart']['key'], np.array([0.0, -0.55, 0.1]))
-    interface.set_mocap_xyz(mapping['demo_mode']['icon'], np.array([0.5, -0.625, 0]))
-    interface.set_mocap_xyz(mapping['demo_mode']['key'], np.array([0.5, -0.55, 0.1]))
+    interface.set_mocap_xyz(mapping['demo_mode']['icon'], np.array([0.45, -0.625, 0]))
+    interface.set_mocap_xyz(mapping['demo_mode']['key'], np.array([0.45, -0.55, 0.1]))
 
 def hide_hotkeys(interface, manual_UI=None):
     # allows us to call this on initialization to clear the keys for other UIs
@@ -321,6 +327,11 @@ def hide_hotkeys(interface, manual_UI=None):
             interface.set_mocap_xyz(planet, planet_locs[0])
             interface.sim.model.geom_rgba[interface.sim.model.geom_name2id(planet)] = [1, 1, 1, 1]
 
+    # if we're manually passing a UI we want to clear it completely, but for the main UI we want
+    # to show the mapping for more information / hotkeys
+    if not manual_UI:
+        interface.set_mocap_xyz(mapping['info']['key'], [0.7, -0.6, 0.1])
+        interface.set_mocap_xyz(mapping['info']['icon'], [0.7, -0.7, 0.01])
 
 def demo(backend, UI, demo_mode):
     rng = np.random.RandomState(9)
