@@ -178,6 +178,10 @@ def display_hotkeys(interface):
     for ii in range(0, len(planets)):
         index = (current_planet_index + ii) % len(planets)
         interface.set_mocap_xyz(planets[index], planet_locs[ii])
+        if planets[ii] != interface.viewer.planet:
+            interface.sim.model.geom_rgba[interface.sim.model.geom_name2id(planets[ii])] = [1, 1, 1, 0.25]
+        else:
+            interface.sim.model.geom_rgba[interface.sim.model.geom_name2id(planets[ii])] = [1, 1, 1, 1]
 
     interface.set_mocap_xyz("a", np.array([0.1, 1, 0.45]))
     interface.set_mocap_xyz("d", np.array([0.6, 1, 0.45]))
@@ -220,8 +224,10 @@ def hide_hotkeys(interface):
     for planet in planets:
         if planet != interface.viewer.planet:
             interface.set_mocap_xyz(planet, hidden_xyz)
+            interface.sim.model.geom_rgba[interface.sim.model.geom_name2id(planet)] = [1, 1, 1, 0.1]
         else:
             interface.set_mocap_xyz(planet, planet_locs[0])
+            interface.sim.model.geom_rgba[interface.sim.model.geom_name2id(planet)] = [1, 1, 1, 1]
 
     interface.set_mocap_xyz("w", hidden_xyz)
     interface.set_mocap_xyz("a", hidden_xyz)
