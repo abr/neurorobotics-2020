@@ -123,22 +123,14 @@
         <texture name="info" file="meshes/info.png" width="512" height="512" type="2d"/>
         <material name="info" texture="info" specular="0" shininess="0" reflectance="0" emission="1" />
 
-        <!-- <texture name="black_rubber" file="meshes/black_rubber.png" width="3000" height="2250" type="2d"/> -->
-        <!--  -->
         <texture name="black_rubber" file="meshes/black_rubber-cube.png" width="2250" height="2250" type="cube"/>
         <material name="black_rubber" texture="black_rubber" specular="0.5" shininess="0" reflectance="0" emission="1" />
 
-        <texture name="black_rubber_2d" file="meshes/black_rubber.png" width="3000" height="2250" type="2d"/>
-        <material name="black_rubber_2d" texture="black_rubber_2d" specular="0.5" shininess="0" reflectance="0" emission="1" />
+        <!-- <texture name="black_rubber_2d" file="meshes/black_rubber.png" width="3000" height="2250" type="2d"/> -->
+        <!-- <material name="black_rubber_2d" texture="black_rubber_2d" specular="0.5" shininess="0" reflectance="0" emission="1" /> -->
 
         <texture name="scratched_aluminum" file="meshes/scratched_aluminum-cube.png" width="975" height="975" type="2d"/>
-
-        <!-- <texture name="scratched_aluminum" file="meshes/scratched_aluminum3&#45;cube.png" width="3744" height="3744" type="2d"/> -->
-        <!--  -->
         <material name="scratched_aluminum" texture="scratched_aluminum" />
-
-        <!-- <texture name="blue_plastic" file="meshes/blue_plastic&#45;cube.png" width="2250" height="2250" type="cube"/> -->
-        <!-- <material name="blue_plastic" texture="blue_plastic" /> -->
 
         <material name="grey_plastic" specular="0.5" shininess="0" reflectance="0" rgba="0.12 0.14 0.14 1" emission="1" />
 

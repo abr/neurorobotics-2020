@@ -1,3 +1,24 @@
+"""
+To run this demo you will need to download the required stl and texture files
+Run the following two commands from the directory this file is in:
+
+TO DOWNLOAD FILES
+wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1N4RSyJeHCMFKgtjdXOD_4A7izpFcFMKw' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1N4RSyJeHCMFKgtjdXOD_4A7izpFcFMKw" -O meshes && rm -rf /tmp/cookies.txt
+
+TO EXTRACT FILES
+tar -zxvf meshes
+
+To run the demo with Nengo running on cpu:
+    python loihi_demo.py cpu
+
+To run the demo with Nengo on loihi
+    NXSDKHOST=loihighrd python loihi_demo.py
+
+To control the demo with an xbox controller append 'gamepad' without quotes to either of the above two commands
+
+To start the demo in demo mode, append 'demo' without quotes
+"""
+
 import glfw
 import os
 import mujoco_py
