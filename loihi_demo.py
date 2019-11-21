@@ -1,4 +1,5 @@
 import glfw
+import os
 import mujoco_py
 import nengo
 import nengo_loihi
@@ -25,13 +26,8 @@ from utils import (
     scale_inputs,
     ScatteredHypersphere,
     get_approach_path,
-    osc6dof,
-    osc3dof,
-    second_order_path_planner,
     target_shift,
     adapt,
-    first_order_arc,
-    first_order_arc_dmp,
     calculate_rotQ,
     ExitSim,
     RestartMujoco,
@@ -336,19 +332,22 @@ def hide_hotkeys(interface, manual_UI=None):
 def demo(backend, UI, demo_mode):
     rng = np.random.RandomState(9)
 
+    #TODO should have a bool array specifying adapting dimensions, right now we go from
+    # joints 0:n_inputs/2
     n_input = 10
-    n_output = 5
+    n_output = int(n_input/2)
 
     n_neurons = 1000
     n_ensembles = 10
     pes_learning_rate = 1e-5 if backend == "cpu" else 1e-5
     seed = 0
     spherical = True  # project the input onto the surface of a D+1 hypersphere
+
+    means = np.zeros(n_input)
+    variances = np.hstack((np.ones(int(n_input/2)) * 6.28, np.ones(int(n_input/2)) * 1.25))
+
     if spherical:
         n_input += 1
-
-    means = np.zeros(10)
-    variances = np.hstack((np.ones(5) * 6.28, np.ones(5) * 1.25))
 
     # synapse time constants
     tau_input = 0.012  # on input connection
@@ -372,7 +371,10 @@ def demo(backend, UI, demo_mode):
     encoders = encoders.reshape(n_ensembles, n_neurons, n_input)
 
     # initialize our robot config for the jaco2
-    robot_config = MujocoConfig("jaco2_gripper", use_sim_state=True)
+    robot_config = MujocoConfig(
+        xml_file="jaco2_demo.xml",
+        folder=os.path.dirname(os.path.realpath(__file__)),
+        use_sim_state=True)
 
     net = nengo.Network(seed=seed)
     # Set the default neuron type for the network
@@ -684,7 +686,7 @@ def demo(backend, UI, demo_mode):
 
                 if viewer.adapt:
                     # adaptive signal added (no signal for last joint)
-                    net.u[: robot_config.N_JOINTS - 1] += u_adapt * adapt_scale
+                    net.u[:n_output] += u_adapt * adapt_scale
 
                 # if net.count % 500 == 0:
                 #     print('u:adapt: ', u_adapt)
@@ -825,6 +827,8 @@ def demo(backend, UI, demo_mode):
                     net.path_vis = viewer.path_vis
 
                 # print out information to mjviewer -----------------------------------
+                #TODO: ERROR when restarting demo mode
+                # None type object is not subscribtable (referencing net.demo_mode)
                 # viewer.custom_print = (
                 #     "%s\n" % net.reach["label"]
                 #     + "Error: %.3fm\n" % error
@@ -871,9 +875,9 @@ def demo(backend, UI, demo_mode):
                 spherical,
                 means,
                 variances,
-                np.hstack([feedback["q"][:5], feedback["dq"][:5]]),
+                np.hstack([feedback["q"][:int((n_input-spherical)/2)], feedback["dq"][:int((n_input-spherical)/2)]]),
             )
-            training_signal = -net.reach["ctrlr"].training_signal[:5]
+            training_signal = -net.reach["ctrlr"].training_signal[:int((n_input-spherical)/2)]
             output_signal = np.hstack([context.flatten(), training_signal.flatten()])
 
             # TODO: scale the training signal here

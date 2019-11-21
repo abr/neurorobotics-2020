@@ -290,23 +290,18 @@ def adapt(in_index, spherical):
     return adaptive
 
 
-def second_order_path_planner(n_timesteps=1000, error_scale=1e-3):
+def second_order_dmp(n_timesteps=1000, error_scale=1e-3):
     """
     Define your path planner of choice here
     """
-    traj_planner = path_planners.BellShaped(
+    traj_planner = path_planners.SecondOrderDMP(
         error_scale=error_scale, n_timesteps=n_timesteps
     )
     return traj_planner
 
 
-def first_order_arc(n_timesteps):
-    traj_planner = path_planners.FirstOrderArc(n_timesteps)
-    return traj_planner
-
-
-def first_order_arc_dmp(n_timesteps, error_scale=1):
-    traj_planner = path_planners.FirstOrderArcDMP(n_timesteps, error_scale)
+def arc(n_timesteps):
+    traj_planner = path_planners.Arc(n_timesteps)
     return traj_planner
 
 
