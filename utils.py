@@ -1,4 +1,7 @@
 import numpy as np
+import requests
+import os
+import tarfile
 
 from abr_control.controllers import OSC, Damping, RestingConfig
 from abr_control.controllers import path_planners, signals
@@ -619,3 +622,76 @@ class ScatteredHypersphere(UniformHypersphere):
         # radius adjustment for ball versus sphere, and a random rotation
         rotation = random_orthogonal(d, rng=rng)
         return np.dot(mapped * radius, rotation)
+
+def check_files_downloaded():
+    # check if we have our stl and texture files
+    current_dir = os.getcwd()
+    # list a few mesh and texture files to make sure they exist
+    check_files = ['arm.STL', 'exit.png', 'controller_RT.stl', 'space.stl', 'abr_logo.png']
+    files_missing = False
+    if not os.path.isdir('%s/meshes'%current_dir):
+        files_missing = True
+    else:
+        for check_file in check_files:
+            if not os.path.exists('%s/meshes/%s' % (current_dir, check_file)):
+                files_missing = True
+                break
+
+    if files_missing:
+        yes = ['y', 'Y', 'yes']
+        no = ['n', 'N', 'no']
+        answered = False
+        question = 'Download mesh and texture files to run sim? (y/n): '
+        while not answered:
+            reply = str(input('Download mesh and texture files to run sim?' +' (y/n): ')).lower().strip()
+
+            if reply[0] in yes:
+                print('Downloading files...')
+                save_loc = '%s/meshes.tar' % current_dir
+                file_id = '1N4RSyJeHCMFKgtjdXOD_4A7izpFcFMKw'
+                download_files(file_id, save_loc)
+                print('Sim files saved to %s/meshes'%current_dir)
+                answered = True
+            elif reply[0] in no:
+                raise Exception ('Please download the required files to run the demo')
+                answered = True
+            else:
+                question = "Please Enter (y/n) "
+
+
+def download_files(file_id, destination):
+    def _get_confirm_token(response):
+        for key, value in response.cookies.items():
+            if key.startswith('download_warning'):
+                return value
+
+        return None
+
+    def _save_response_content(response, destination):
+        CHUNK_SIZE = 32768
+
+        with open(destination, "wb") as f:
+            for chunk in response.iter_content(CHUNK_SIZE):
+                if chunk: # filter out keep-alive new chunks
+                    f.write(chunk)
+
+    def _extract_tar_files(tar_file):
+        tarball = tarfile.open(tar_file)
+        tarball.extractall()
+        tarball.close()
+        os.remove(tar_file)
+
+    URL = "https://docs.google.com/uc?export=download"
+
+    session = requests.Session()
+
+    response = session.get(URL, params = { 'id' : file_id }, stream = True)
+    token = _get_confirm_token(response)
+
+    if token:
+        params = { 'id' : file_id, 'confirm' : token }
+        response = session.get(URL, params = params, stream = True)
+
+    _save_response_content(response, destination)
+
+    _extract_tar_files(destination)

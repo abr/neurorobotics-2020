@@ -21,6 +21,7 @@ To start the demo in demo mode, append 'demo' without quotes
 
 import glfw
 import os
+from urllib.request import urlretrieve
 import mujoco_py
 import nengo
 import nengo_loihi
@@ -52,6 +53,7 @@ from utils import (
     calculate_rotQ,
     ExitSim,
     RestartMujoco,
+    check_files_downloaded
 )
 
 from reach_list import gen_reach_list
@@ -74,6 +76,8 @@ if len(sys.argv) > 1:
             demo_mode = True
 
 print("Using %s as backend" % backend)
+
+check_files_downloaded()
 
 key_mapping = {
         'keyboard': {
