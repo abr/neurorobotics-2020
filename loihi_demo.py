@@ -42,17 +42,17 @@ from abr_control.utils.transformations import (
     quaternion_from_euler,
 )
 
-from utils import (
+from abr_control._vendor.nengolib.stats import ScatteredHypersphere
+from abr_control.controllers.signals.dynamics_adaptation import(
     AreaIntercepts,
-    Triangular,
+    Triangular
+)
+from utils import (
     scale_inputs,
-    ScatteredHypersphere,
     get_approach_path,
     target_shift,
-    adapt,
     calculate_rotQ,
     ExitSim,
-    RestartMujoco,
 )
 
 from reach_list import gen_reach_list
