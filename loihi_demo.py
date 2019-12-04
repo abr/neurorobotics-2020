@@ -458,6 +458,7 @@ def demo(backend, UI, demo_mode):
         net.count = 0
         net.at_target = 0
         net.dumbbell_mass_index = 0
+        net.picked_up_once = False
 
     with net:
 
@@ -541,6 +542,8 @@ def demo(backend, UI, demo_mode):
                     net.reach_mode = net.auto_reach_modes[net.auto_reach_index]
                     viewer.target = net.auto_targets[net.auto_target_index]
                 else:
+                    if viewer.reach_mode == 'drop_off' and not net.picked_up_once:
+                        viewer.reach_mode = 'reach_target'
                     net.reach_mode = viewer.reach_mode
                     net.auto_reach_index = 0
                     net.auto_target_index = 0
@@ -887,6 +890,9 @@ def demo(backend, UI, demo_mode):
                     else:
                         interface.set_mocap_xyz(name, [0, 0, -100])
 
+                if reach_list[net.reach_mode][net.reach_index]['label'] == 'grasp_object':
+                    net.picked_up_once = True
+
             # we made it out of the loop, so the adapt sign should be on! -------------
             net.model.geom_rgba[adapt_geom_id] = adapt_on
             interface.set_mocap_xyz("brain", [0, 0.75, 0.2])
@@ -984,12 +990,12 @@ if __name__ == "__main__":
                 net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
             ) as sim:
                 while 1:
-                    sim.run(1e5)
+                    sim.run(1e5, progress_bar=False)
 
         elif backend == "cpu":
             with nengo.Simulator(net) as sim:
                 while 1:
-                    sim.run(1e5)
+                    sim.run(1e5, progress_bar=False)
 
     except ExitSim:
         pass
