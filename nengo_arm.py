@@ -9,14 +9,10 @@ TO EXTRACT FILES
 tar -zxvf meshes
 
 To run the demo with Nengo running on cpu:
-    python loihi_demo.py cpu
+    python nengo_arm.py cpu
 
 To run the demo with Nengo on loihi
-    NXSDKHOST=loihighrd python loihi_demo.py
-
-To control the demo with an xbox controller append 'gamepad' without quotes to either of the above two commands
-
-To start the demo in demo mode, append 'demo' without quotes
+    NXSDKHOST=loihighrd python nengo_arm.py
 """
 import glfw
 import mujoco_py
@@ -186,7 +182,6 @@ def demo():
         # -----------------------------------------------------------------------------
 
         arm = nengo.Node(arm_func, size_in=n_dof, size_out=n_input + n_output)
-        # arm_probe = nengo.Probe(arm)  ??? TODO: is this a loihi needed probe?
 
         input_decodeneurons = decode_neurons.Preset5DecodeNeurons()
         onchip_input = input_decodeneurons.get_ensemble(dim=n_input)

@@ -50,7 +50,6 @@ from abr_control.controllers.signals.dynamics_adaptation import(
 from utils import (
     scale_inputs,
     get_approach_path,
-    target_shift,
     calculate_rotQ,
     ExitSim,
 )
