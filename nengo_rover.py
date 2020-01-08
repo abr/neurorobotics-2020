@@ -15,7 +15,6 @@ import sys
 import time
 
 from nengo_loihi import decode_neurons
-
 from abr_control.arms.mujoco_config import MujocoConfig
 from abr_control.interfaces.mujoco import Mujoco
 
@@ -54,7 +53,8 @@ def demo():
     net = nengo.Network(seed=0)
     # create our Mujoco interface
     net.interface = Mujoco(robot_config, dt=0.001, visualize=True)
-    net.interface.connect(camera_id=0)
+    #net.interface.connect(camera_id=0)
+    net.interface.connect()
     # shorthand
     interface = net.interface
     viewer = interface.viewer
@@ -84,9 +84,17 @@ def demo():
     with net:
         net.count = 0
         def sim_func(t, u):
+            if net.count%5 == 0:
+                interface.sim.render(1000, 200, camera_name='vision1')
+            if net.count%11 == 0:
+                interface.sim.render(1000, 200, camera_name='vision2')
+            # else:
+            #     print((interface.sim.render(100, 100, camera_name='vision2')).shape)
+
             kp = 2
             feedback = interface.get_feedback()
-            u[0] = kp * (u[0]- feedback['q'][0]) - .8 * kp * feedback['dq'][0]
+            u0 = kp * (u[0]- feedback['q'][0]) - .8 * kp * feedback['dq'][0]
+            u = [u0, u[1], u[2]]
 
             if viewer.exit:
                 glfw.destroy_window(viewer.window)
@@ -99,6 +107,7 @@ def demo():
                 viewer.target = np.random.rand(3) * np.array(
                     [4, 4, 0]
                 ) - np.array([2, 2, 0])
+                viewer.target[2] = 0.4
                 interface.set_mocap_xyz("target", viewer.target)
                 print('target location: ', viewer.target)
 

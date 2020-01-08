@@ -21,6 +21,7 @@ import nengo_loihi
 import numpy as np
 import sys
 import time
+import timeit
 
 from nengo_loihi import decode_neurons
 
@@ -32,6 +33,7 @@ from abr_control._vendor.nengolib.stats.ntmdists import (
     ScatteredHypersphere,
     spherical_transform,
 )
+from nengo_extras.dists import AreaIntercepts, Triangular
 
 
 class ExitSim(Exception):
@@ -90,6 +92,17 @@ def demo():
         ctrlr_dof=[True, True, True, False, False, False],
     )
 
+    # set up neuron intercepts
+    intercepts_bounds = [-0.4, -0.1]
+    intercepts_mode = -0.3
+
+    intercepts_dist = AreaIntercepts(
+        dimensions=n_input,
+        base=Triangular(intercepts_bounds[0], intercepts_mode, intercepts_bounds[1]),
+    )
+    intercepts = intercepts_dist.sample(n=n_neurons * n_ensembles, rng=rng)
+    intercepts = intercepts.reshape(n_ensembles, n_neurons)
+
     # get target object id so we can change its colour
     target_geom_id = model.geom_name2id("target")
     green = [0, 0.9, 0, 0.5]
@@ -111,7 +124,6 @@ def demo():
         net.u[robot_config.N_JOINTS:] = np.ones(3) * -0.2  # set gripper forces
         net.trajectory_planner = path_planners.Arc(n_timesteps=1000)
         net.count = 0
-
         # The simulation will stay inside this node while loop until adaptation is
         # turned on, at which point a signal will be sent out to the ensemble and the
         # neurons will be simulated.
@@ -136,7 +148,7 @@ def demo():
 
                     # generate our path to the new target
                     net.trajectory_planner.generate_path(
-                        position=robot_config.Tx('EE'), target_pos=viewer.target
+                        position=robot_config.Tx('EE'), target_position=viewer.target
                     )
                     interface.set_mocap_xyz("target", viewer.target)
                     net.next_reach = False
@@ -214,6 +226,7 @@ def demo():
                     dimensions=n_input,
                     radius=np.sqrt(n_input),
                     encoders=encoders[ii],
+                    intercepts=intercepts[ii],
                     label="ens%02d" % ii,
                 )
             )

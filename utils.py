@@ -16,8 +16,8 @@ import scipy.special
 from scipy.linalg import svd
 from scipy.special import beta, betainc, betaincinv
 from nengo.dists import Distribution, UniformHypersphere
-from nengo.utils.compat import is_integer
-
+# from nengo.utils.compat import is_integer
+#
 
 class ExitSim(Exception):
     print('Restarting simulation')
@@ -138,6 +138,8 @@ def get_approach_path(
         rotation axis
     """
 
+    orientation_path = path_planners.Orientation()
+
     if target_pos[2] < min_z:
         # make sure the target isn't too close to the ground
         target_pos[2] = min_z
@@ -162,19 +164,20 @@ def get_approach_path(
         approach_orient = target_orientation
 
     # generate our path to our approach position
-    path_planner.generate_path(position=start_pos, target_pos=approach_pos)
+    path_planner.generate_path(position=start_pos, target_position=approach_pos)
 
     # generate our orientation planner
-    _, orientation_planner = path_planner.generate_orientation_path(
-        orientation=starting_orientation, target_orientation=approach_orient
-    )
+    orientation_path.match_position_path(
+            orientation=starting_orientation, target_orientation=approach_orient,
+        position_path=path_planner.position_path)
+
     target_data = {
         "target_pos": target_pos,
         "approach_pos": approach_pos,
         "approach_orient": approach_orient,
     }
 
-    return path_planner, orientation_planner, target_data
+    return path_planner, orientation_path, target_data
 
 
 def osc6dof(robot_config, rest_angles=None):

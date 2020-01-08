@@ -43,7 +43,8 @@ from abr_control.utils.transformations import (
 )
 
 from abr_control._vendor.nengolib.stats import ScatteredHypersphere
-from abr_control.controllers.signals.dynamics_adaptation import(
+# from abr_control.controllers.signals.dynamics_adaptation import(
+from nengo_extras.dists import(
     AreaIntercepts,
     Triangular
 )
@@ -666,7 +667,7 @@ def demo(backend, UI, demo_mode):
                         net.n_timesteps = net.reach["n_timesteps"] - net.count
                         net.trajectory_planner.generate_path(
                             position=net.pos,
-                            target_pos=viewer.target + net.reach["offset"],
+                            target_position=viewer.target + net.reach["offset"],
                         )
                         interface.set_mocap_xyz("target", viewer.target)
                         viewer.target_moved = False
@@ -986,15 +987,16 @@ if __name__ == "__main__":
     try:
         if backend == "loihi":
             with nengo_loihi.Simulator(
-                net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
+                net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300),
+                progress_bar=False
             ) as sim:
                 while 1:
-                    sim.run(1e5, progress_bar=False)
+                    sim.run(1e5)
 
         elif backend == "cpu":
-            with nengo.Simulator(net) as sim:
+            with nengo.Simulator(net, progress_bar=False) as sim:
                 while 1:
-                    sim.run(1e5, progress_bar=False)
+                    sim.run(1e5)
 
     except ExitSim:
         pass
