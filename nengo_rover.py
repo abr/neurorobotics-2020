@@ -13,6 +13,7 @@ import numpy as np
 import os
 import sys
 import time
+import matplotlib.pyplot as plt
 
 from nengo_loihi import decode_neurons
 from abr_control.arms.mujoco_config import MujocoConfig
@@ -53,8 +54,8 @@ def demo():
     net = nengo.Network(seed=0)
     # create our Mujoco interface
     net.interface = Mujoco(robot_config, dt=0.001, visualize=True)
-    #net.interface.connect(camera_id=0)
-    net.interface.connect()
+    net.interface.connect(camera_id=0)
+    #net.interface.connect()
     # shorthand
     interface = net.interface
     viewer = interface.viewer
@@ -81,13 +82,37 @@ def demo():
     n_input = 3  # input to neural net is body_com y velocity and error along (x, y) plane
     n_output = n_dof  # output from neural net is torque signals for the wheels
 
+    subs = 10
+    steps = 500
+    plt.Figure()
+    net.a = []
+    if subs<5:
+        for sub in range(subs):
+            net.a.append(plt.subplot(subs, 1, sub+1))
+    else:
+        for sub in range(subs):
+            net.a.append(plt.subplot(int(subs/2), 2, sub+1))
+    imgs = []
+
     with net:
         net.count = 0
+        net.hits = 0
         def sim_func(t, u):
-            if net.count%5 == 0:
-                interface.sim.render(1000, 200, camera_name='vision1')
-            if net.count%11 == 0:
-                interface.sim.render(1000, 200, camera_name='vision2')
+            if net.count%steps == 0:
+                imgs.append(interface.sim.render(800, 800, camera_name='vision1'))
+                net.hits += 1
+                if net.hits >= subs:
+                    print('SHOWING!!!!!')
+                    for sub in range(subs):
+                        print('sub: ', sub)
+                        net.a[sub].imshow(imgs[sub], origin='lower')
+                    plt.show()
+                # elif net.count%1000 == 0:
+                #     # img = interface.sim.render(1000, 200, camera_name='vision2')
+                #     net.a[net.hits].imshow(img)
+                #     print('show one')
+                #     plt.show()
+                #     net.hits += 1
             # else:
             #     print((interface.sim.render(100, 100, camera_name='vision2')).shape)
 
