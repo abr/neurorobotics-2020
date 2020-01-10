@@ -54,7 +54,7 @@ def demo():
     net = nengo.Network(seed=0)
     # create our Mujoco interface
     net.interface = Mujoco(robot_config, dt=0.001, visualize=True)
-    net.interface.connect(camera_id=1)
+    net.interface.connect(camera_id=-1)
     #net.interface.connect()
     # shorthand
     interface = net.interface
@@ -82,16 +82,18 @@ def demo():
     n_input = 3  # input to neural net is body_com y velocity and error along (x, y) plane
     n_output = n_dof  # output from neural net is torque signals for the wheels
 
-    subs = 10
-    steps = 500
-    plt.Figure()
-    net.a = []
-    if subs<5:
-        for sub in range(subs):
-            net.a.append(plt.subplot(subs, 1, sub+1))
-    else:
-        for sub in range(subs):
-            net.a.append(plt.subplot(int(subs/2), 2, sub+1))
+    subs = 4
+    steps = 2000
+    # plt.Figure()
+    # net.a = []
+    # for sub in range(subs):
+    #     net.a.append(plt.subplot(2, 2, sub+1))
+    # if subs<5:
+    #     for sub in range(subs):
+    #         net.a.append(plt.subplot(subs, 1, sub+1))
+    # else:
+    #     for sub in range(subs):
+    #         net.a.append(plt.subplot(int(subs/2), 2, sub+1))
     imgs = []
     with net:
         net.count = 0
@@ -99,18 +101,37 @@ def demo():
         net.imgs = []
         def sim_func(t, u):
             def make_plot():
-                plt.Figure()
-                a = []
-                if subs<5:
-                    for sub in range(subs):
-                        a.append(plt.subplot(subs, 1, sub+1))
-                else:
-                    for sub in range(subs):
-                        a.append(plt.subplot(int(subs/2), 2, sub+1))
+                # plt.Figure()
+                # a = []
+                # for sub in range(subs):
+                #     a.append(plt.subplot(2, 2, sub+1))
+                # if subs<5:
+                #     for sub in range(subs):
+                #         a.append(plt.subplot(subs, 1, sub+1))
+                # else:
+                #     for sub in range(subs):
+                #         a.append(plt.subplot(int(subs/2), 2, sub+1))
 
-                for sub in range(subs):
-                    print('sub: ', sub)
-                    a[sub].imshow(net.imgs[sub], origin='lower')
+                # for sub in range(subs):
+                #     print('sub: ', sub)
+                #     a[sub].imshow(net.imgs[sub], origin='lower')
+                #     print(net.imgs[sub].shape)
+                # plt.show()
+                plt.Figure()
+                print('\n\n START')
+                a = np.array(np.hstack((net.imgs[0], net.imgs[1])))
+                print(a.shape)
+                print('\n\n START')
+                b = (np.hstack((net.imgs[2], net.imgs[3])))
+                print(b.shape)
+                print('\n\n START')
+                c = (np.vstack((a, b)))
+                print(c.shape)
+                # imgs = np.stack((
+                #         np.stack((net.imgs[0], net.imgs[1]), axis=1),
+                #         np.stack((net.imgs[2], net.imgs[3]), axis=1)
+                #         ), axis=0)
+                plt.imshow(c, origin='lower')
                 plt.show()
                 net.imgs = []
                 net.hits = 0
@@ -132,13 +153,14 @@ def demo():
                     [4, 4, 0]
                 ) - np.array([2, 2, 0])
                 viewer.target[2] = 0.4
+                viewer.target[1] = 4.5
                 interface.set_mocap_xyz("target", viewer.target)
                 print('target location: ', viewer.target)
 
             # change target from red to green if within 0.02m -------------------------
             error = viewer.target - robot_config.Tx('EE')
-            model.geom_rgba[target_geom_id] = green if np.linalg.norm(error) < 0.02 else red
-
+            # model.geom_rgba[target_geom_id] = green if np.linalg.norm(error) < 0.02 else red
+            #
             # error is in global coordinates, want it in local coordinates for rover --
             # body_xmat will take from local coordinates to global
             R = np.copy(data.body_xmat[EE_id]).reshape(3, 3).T  # R.T = R^-1
@@ -163,7 +185,10 @@ def demo():
                 #net.imgs.append(interface.sim.render(200, 200, camera_name='vision1'))
                 interface.sim.render(1920, 1080, camera_name='vision1')
                 net.imgs.append(interface.sim.render(32, 32, camera_name='vision1'))
-                net.hits += 1
+                net.imgs.append(interface.sim.render(32, 32, camera_name='vision2'))
+                net.imgs.append(interface.sim.render(32, 32, camera_name='vision3'))
+                net.imgs.append(interface.sim.render(32, 32, camera_name='vision4'))
+                net.hits += 4
                 if net.hits >= subs:
                     # for sub in range(subs):
                     #     print('sub: ', sub)

@@ -6,7 +6,7 @@
 
     <default>
         <light castshadow="false" diffuse="1 1 1" />
-        <camera fovy="60" />
+        <camera fovy="90" />
         <geom contype="1" conaffinity="1" />
     </default>
 
@@ -38,14 +38,18 @@
     <worldbody>
         <geom name="floor" pos="0 0 -0.001" size="5 5 0.5" type="plane"/>
         <!-- Walls for debugging camera position -->
-        <geom name='blue' pos="0 5 0" type="box" size="5 0.2 2.5" rgba="0 0 1 1"/>
-        <geom name='yellow' pos="0 -5 0" type="box" size="5 0.2 2.5" rgba="1 1 0 1"/>
-        <geom name='green' pos="5 0 0" type="box" size="0.2 5 2.5" rgba="0 1 0 1"/>
-        <geom name='purple' pos="-5 0 0" type="box" size="0.2 5 2.5" rgba="1 0 1 1"/>
-        <geom name='pillar1' pos="-5 0 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/>
-        <geom name='pillar2' pos="5 0 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/>
-        <geom name='pillar3' pos="0 5 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/>
-        <geom name='pillar4' pos="0 -5 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/>
+        <!-- <geom name='blue' pos="0 5 0" type="box" size="5 0.2 2.5" rgba="0 0 1 1"/> -->
+        <!-- <geom name='yellow' pos="0 &#45;5 0" type="box" size="5 0.2 2.5" rgba="1 1 0 1"/> -->
+        <!-- <geom name='green' pos="5 0 0" type="box" size="0.2 5 2.5" rgba="0 1 0 1"/> -->
+        <!-- <geom name='purple' pos="&#45;5 0 0" type="box" size="0.2 5 2.5" rgba="1 0 1 1"/> -->
+        <!-- <geom name='pillar1' pos="&#45;5 0 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/> -->
+        <!-- <geom name='pillar2' pos="5 0 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/> -->
+        <!-- <geom name='pillar3' pos="0 5 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/> -->
+        <!-- <geom name='pillar4' pos="0 &#45;5 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/> -->
+        <geom name='wally' pos="0 5 0" type="box" size="5 0.2 2.5" rgba="1 1 1 1"/>
+        <geom name='wall-y' pos="0 -5 0" type="box" size="5 0.2 2.5" rgba="1 1 1 1"/>
+        <geom name='wallx' pos="5 0 0" type="box" size="0.2 5 2.5" rgba="1 1 1 1"/>
+        <geom name='wall-x' pos="-5 0 0" type="box" size="0.2 5 2.5" rgba="1 1 1 1"/>
 
         <body pos="3 0 3">
             <camera mode="targetbody" target="base_link"/>
@@ -57,7 +61,9 @@
         </body>
 
         <body name="target" pos="0 0 -0.15" mocap="true">
-            <geom name="target" type="sphere" size="0.05" rgba=".9 0 0 .5" contype="4" conaffinity="4"/>
+            <!-- <geom name="target" type="sphere" size="0.05" rgba=".9 0 0 .5" contype="4" conaffinity="4"/> -->
+            <!--  -->
+            <geom name="target" type="sphere" size="0.05" rgba="1 0 0 1" contype="4" conaffinity="4"/>
         </body>
 
         <body name="obstacle" pos="0 0 -0.15" mocap="true">
@@ -69,10 +75,10 @@
         <body name="base_link" pos="0 0 0.1">
             <!-- body -->
             <geom name="link0" type="box" size="0.15 0.08 0.03" pos="0 0 0.09" material="blue_steel"/>
-            <camera name="vision1" pos="0 0 0.5" quat="0.50039816  0.49999984 -0.49999984 -0.49960184" fovy="90"/>
-            <!-- <camera name="vision2" pos="0 0 0.5" quat="&#45;0.4996012  &#45;0.49920352 &#45;0.50079617 &#45;0.50039753" fovy="90"/> -->
-            <!-- <!&#45;&#45; <camera name="vision2" pos="0 0 0.5" quat="&#38;#45;0.4996012  &#38;#45;0.49920352 &#38;#45;0.50079617 &#38;#45;0.50039753" fovy="90"/> &#45;&#45;> -->
-            <!-- <camera name="vision2" pos="0 0 0.5" quat="&#45;0.4996012  &#45;0.49920352 &#45;0.50079617 &#45;0.50039753" fovy="90"/> -->
+            <camera name="vision1" pos="0 0 0.5" quat="0.50039816  0.49999984 -0.49999984 -0.49960184"/>
+            <camera name="vision2" pos="0 0 0.5" quat="-0.4996012  -0.49920352 -0.50079617 -0.50039753"/>
+            <camera name="vision3" pos="0 0 0.5" quat="5.63312174e-04 -5.62863772e-04 -7.06824957e-01 -7.07388045e-01"/>
+            <camera name="vision4" pos="0 0 0.5" quat="0.7073882691671998 0.706825181105366 0.0 0.0"/>
 
             <inertial pos="0 0 0.125" mass="5" diaginertia="0.25 0.25 0.25"/>
             <freejoint/>
