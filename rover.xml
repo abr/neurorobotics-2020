@@ -10,6 +10,10 @@
         <geom contype="1" conaffinity="1" />
     </default>
 
+    <!-- <visual> -->
+    <!--     <map znear="0.003"/> -->
+    <!-- </visual> -->
+
     <custom>
         <numeric name="START_ANGLES" data="0 0 0 0"/>
         <text name="google_id" data='None'/>
@@ -38,6 +42,10 @@
         <geom name='yellow' pos="0 -5 0" type="box" size="5 0.2 2.5" rgba="1 1 0 1"/>
         <geom name='green' pos="5 0 0" type="box" size="0.2 5 2.5" rgba="0 1 0 1"/>
         <geom name='purple' pos="-5 0 0" type="box" size="0.2 5 2.5" rgba="1 0 1 1"/>
+        <geom name='pillar1' pos="-5 0 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/>
+        <geom name='pillar2' pos="5 0 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/>
+        <geom name='pillar3' pos="0 5 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/>
+        <geom name='pillar4' pos="0 -5 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/>
 
         <body pos="3 0 3">
             <camera mode="targetbody" target="base_link"/>
@@ -63,7 +71,9 @@
             <geom name="link0" type="box" size="0.15 0.08 0.03" pos="0 0 0.09" material="blue_steel"/>
             <camera name="vision1" pos="0 0 0.5" quat="0.50039816  0.49999984 -0.49999984 -0.49960184" fovy="90"/>
             <!-- <camera name="vision2" pos="0 0 0.5" quat="&#45;0.4996012  &#45;0.49920352 &#45;0.50079617 &#45;0.50039753" fovy="90"/> -->
-            <!--  -->
+            <!-- <!&#45;&#45; <camera name="vision2" pos="0 0 0.5" quat="&#38;#45;0.4996012  &#38;#45;0.49920352 &#38;#45;0.50079617 &#38;#45;0.50039753" fovy="90"/> &#45;&#45;> -->
+            <!-- <camera name="vision2" pos="0 0 0.5" quat="&#45;0.4996012  &#45;0.49920352 &#45;0.50079617 &#45;0.50039753" fovy="90"/> -->
+
             <inertial pos="0 0 0.125" mass="5" diaginertia="0.25 0.25 0.25"/>
             <freejoint/>
 
@@ -122,48 +132,51 @@
             </body>
 
             <!-- rear axl -->
-            <body name="rear_axl" pos="0.1 0 0.09">
-                <geom name="rear_axl" type="cylinder" pos="0 0 0" material="blue_steel" size="0.015 0.15" euler="1.57 0 0"/>
-                <!-- rear right axl -->
-                <body name="RR_axl_box" pos="0 0.12 0">
-                    <geom name="RR_axl_box" type="box" size="0.025 0.015 0.025" pos="0 0 0" material="light_grey"/>
-                    <!-- rear right strut -->
-                    <body name="RR_strut" pos="0.025 0 -0.025">
-                        <geom name="RR_strut" type="cylinder" pos="0 0 0" material="blue_steel" size="0.01 0.05" euler="0 2.356194 0"/>
-                        <!-- rear right motor box -->
-                        <body name="RR_motor_box" pos="0.04 0 -0.04">
-                            <geom name="RR_motor_box" type="box" size="0.015 0.03 0.015" pos="0 0 0" material="light_grey" contype="2" conaffinity="2"/>
-                            <!-- rear right wheel -->
-                            <body name="RR_wheel" pos="0 0.045 0">
-                                <geom name="RR_wheel" type="cylinder" pos="0 0 0" material="carbon" size="0.05 0.015" euler="1.57 0 0"/>
-                                <joint name="joint3" axis="0 -1 0" pos="0 0 0"/>
-                                <geom name="RR_hub" type="cylinder" pos="0 0.0151 0" material="light_grey" size="0.03 0.001" euler="1.57 0 0"/>
-                                <geom name="RR_nut1" type="cylinder" pos="0 0.0152 0.02" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
-                                <geom name="RR_nut2" type="cylinder" pos="0 0.0152 -0.02" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
-                                <geom name="RR_nut3" type="cylinder" pos="0.02 0.0152 0" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
-                                <geom name="RR_nut4" type="cylinder" pos="-0.02 0.0152 0" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
+            <body name="static_axl" pos="0.1 0 0.05">
+                <geom name="static_axl_cyl" type="cylinder" size="0.015 0.025" pos="0 0 0" material="light_grey" contype="2" conaffinity="2"/>
+                <body name="rear_axl" pos="0 0 -0.02">
+                    <geom name="rear_axl" type="cylinder" pos="0 0 0" material="blue_steel" size="0.015 0.15" euler="1.57 0 0"/>
+                    <!-- rear right axl -->
+                    <body name="RR_axl_box" pos="0 0.12 0">
+                        <geom name="RR_axl_box" type="box" size="0.025 0.015 0.025" pos="0 0 0" material="light_grey"/>
+                        <!-- rear right strut -->
+                        <body name="RR_strut" pos="0.025 0 -0.025">
+                            <geom name="RR_strut" type="cylinder" pos="0 0 0" material="blue_steel" size="0.01 0.05" euler="0 2.356194 0"/>
+                            <!-- rear right motor box -->
+                            <body name="RR_motor_box" pos="0.04 0 -0.04">
+                                <geom name="RR_motor_box" type="box" size="0.015 0.03 0.015" pos="0 0 0" material="light_grey" contype="2" conaffinity="2"/>
+                                <!-- rear right wheel -->
+                                <body name="RR_wheel" pos="0 0.045 0">
+                                    <geom name="RR_wheel" type="cylinder" pos="0 0 0" material="carbon" size="0.05 0.015" euler="1.57 0 0"/>
+                                    <joint name="joint3" axis="0 -1 0" pos="0 0 0"/>
+                                    <geom name="RR_hub" type="cylinder" pos="0 0.0151 0" material="light_grey" size="0.03 0.001" euler="1.57 0 0"/>
+                                    <geom name="RR_nut1" type="cylinder" pos="0 0.0152 0.02" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
+                                    <geom name="RR_nut2" type="cylinder" pos="0 0.0152 -0.02" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
+                                    <geom name="RR_nut3" type="cylinder" pos="0.02 0.0152 0" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
+                                    <geom name="RR_nut4" type="cylinder" pos="-0.02 0.0152 0" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
+                                </body>
                             </body>
                         </body>
                     </body>
-                </body>
-                <!-- rear left axl -->
-                <body name="RL_axl_box" pos="0 -0.12 0">
-                    <geom name="RL_axl_box" type="box" size="0.025 0.015 0.025" pos="0 0 0" material="light_grey"/>
-                    <!-- rear left strut -->
-                    <body name="RL_strut" pos="0.025 0 -0.025">
-                        <geom name="RL_strut" type="cylinder" pos="0 0 0" material="blue_steel" size="0.01 0.05" euler="0 2.356194 0"/>
-                        <!-- rear left motor box -->
-                        <body name="RL_motor_box" pos="0.04 0 -0.04">
-                            <geom name="RL_motor_box" type="box" size="0.015 0.03 0.015" pos="0 0 0" material="light_grey" contype="2" conaffinity="2"/>
-                            <!-- rear left wheel -->
-                            <body name="RL_wheel" pos="0 -0.045 0">
-                                <geom name="RL_wheel" type="cylinder" pos="0 0 0" material="carbon" size="0.05 0.015" euler="1.57 0 0"/>
-                                <joint name="joint4" axis="0 -1 0" pos="0 0 0"/>
-                                <geom name="RL_hub" type="cylinder" pos="0 -0.0151 0" material="light_grey" size="0.03 0.001" euler="1.57 0 0"/>
-                                <geom name="RL_nut1" type="cylinder" pos="0 -0.0152 0.02" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
-                                <geom name="RL_nut2" type="cylinder" pos="0 -0.0152 -0.02" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
-                                <geom name="RL_nut3" type="cylinder" pos="0.02 -0.0152 0" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
-                                <geom name="RL_nut4" type="cylinder" pos="-0.02 -0.0152 0" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
+                    <!-- rear left axl -->
+                    <body name="RL_axl_box" pos="0 -0.12 0">
+                        <geom name="RL_axl_box" type="box" size="0.025 0.015 0.025" pos="0 0 0" material="light_grey"/>
+                        <!-- rear left strut -->
+                        <body name="RL_strut" pos="0.025 0 -0.025">
+                            <geom name="RL_strut" type="cylinder" pos="0 0 0" material="blue_steel" size="0.01 0.05" euler="0 2.356194 0"/>
+                            <!-- rear left motor box -->
+                            <body name="RL_motor_box" pos="0.04 0 -0.04">
+                                <geom name="RL_motor_box" type="box" size="0.015 0.03 0.015" pos="0 0 0" material="light_grey" contype="2" conaffinity="2"/>
+                                <!-- rear left wheel -->
+                                <body name="RL_wheel" pos="0 -0.045 0">
+                                    <geom name="RL_wheel" type="cylinder" pos="0 0 0" material="carbon" size="0.05 0.015" euler="1.57 0 0"/>
+                                    <joint name="joint4" axis="0 -1 0" pos="0 0 0"/>
+                                    <geom name="RL_hub" type="cylinder" pos="0 -0.0151 0" material="light_grey" size="0.03 0.001" euler="1.57 0 0"/>
+                                    <geom name="RL_nut1" type="cylinder" pos="0 -0.0152 0.02" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
+                                    <geom name="RL_nut2" type="cylinder" pos="0 -0.0152 -0.02" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
+                                    <geom name="RL_nut3" type="cylinder" pos="0.02 -0.0152 0" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
+                                    <geom name="RL_nut4" type="cylinder" pos="-0.02 -0.0152 0" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
+                                </body>
                             </body>
                         </body>
                     </body>

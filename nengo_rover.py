@@ -54,7 +54,7 @@ def demo():
     net = nengo.Network(seed=0)
     # create our Mujoco interface
     net.interface = Mujoco(robot_config, dt=0.001, visualize=True)
-    net.interface.connect(camera_id=0)
+    net.interface.connect(camera_id=1)
     #net.interface.connect()
     # shorthand
     interface = net.interface
@@ -93,40 +93,39 @@ def demo():
         for sub in range(subs):
             net.a.append(plt.subplot(int(subs/2), 2, sub+1))
     imgs = []
-
     with net:
         net.count = 0
         net.hits = 0
+        net.imgs = []
         def sim_func(t, u):
-            if net.count%steps == 0:
-                imgs.append(interface.sim.render(800, 800, camera_name='vision1'))
-                net.hits += 1
-                if net.hits >= subs:
-                    print('SHOWING!!!!!')
+            def make_plot():
+                plt.Figure()
+                a = []
+                if subs<5:
                     for sub in range(subs):
-                        print('sub: ', sub)
-                        net.a[sub].imshow(imgs[sub], origin='lower')
-                    plt.show()
-                # elif net.count%1000 == 0:
-                #     # img = interface.sim.render(1000, 200, camera_name='vision2')
-                #     net.a[net.hits].imshow(img)
-                #     print('show one')
-                #     plt.show()
-                #     net.hits += 1
-            # else:
-            #     print((interface.sim.render(100, 100, camera_name='vision2')).shape)
+                        a.append(plt.subplot(subs, 1, sub+1))
+                else:
+                    for sub in range(subs):
+                        a.append(plt.subplot(int(subs/2), 2, sub+1))
+
+                for sub in range(subs):
+                    print('sub: ', sub)
+                    a[sub].imshow(net.imgs[sub], origin='lower')
+                plt.show()
+                net.imgs = []
+                net.hits = 0
 
             kp = 2
             feedback = interface.get_feedback()
             u0 = kp * (u[0]- feedback['q'][0]) - .8 * kp * feedback['dq'][0]
-            u = [0,0,0]
+            u = [u0, u[1], u[2]]
 
             if viewer.exit:
                 glfw.destroy_window(viewer.window)
                 raise ExitSim()
 
             # send to mujoco, stepping the sim forward --------------------------------
-            interface.send_forces(u)
+            interface.send_forces(0*np.asarray(u))
 
             if net.count % 4000 == 0:
                 viewer.target = np.random.rand(3) * np.array(
@@ -159,6 +158,21 @@ def demo():
 
             net.count += 1
             output_signal = np.hstack([body_com_vel[1], local_error[:2]])
+
+            if net.count%steps == 0:
+                #net.imgs.append(interface.sim.render(200, 200, camera_name='vision1'))
+                interface.sim.render(1920, 1080, camera_name='vision1')
+                net.imgs.append(interface.sim.render(32, 32, camera_name='vision1'))
+                net.hits += 1
+                if net.hits >= subs:
+                    # for sub in range(subs):
+                    #     print('sub: ', sub)
+                    #     net.a[sub].imshow(imgs[sub], origin='lower')
+                    # plt.show()
+                    print('SHOWING!!!!!')
+                    make_plot()
+
+
             return output_signal
 
         # -----------------------------------------------------------------------------
