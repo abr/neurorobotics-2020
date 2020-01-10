@@ -46,10 +46,10 @@
         <!-- <geom name='pillar2' pos="5 0 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/> -->
         <!-- <geom name='pillar3' pos="0 5 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/> -->
         <!-- <geom name='pillar4' pos="0 &#45;5 0" type="box" size="0.3 0.3 5" rgba="1 1 1 1"/> -->
-        <geom name='wally' pos="0 5 0" type="box" size="5 0.2 2.5" rgba="1 1 1 1"/>
-        <geom name='wall-y' pos="0 -5 0" type="box" size="5 0.2 2.5" rgba="1 1 1 1"/>
-        <geom name='wallx' pos="5 0 0" type="box" size="0.2 5 2.5" rgba="1 1 1 1"/>
-        <geom name='wall-x' pos="-5 0 0" type="box" size="0.2 5 2.5" rgba="1 1 1 1"/>
+        <geom name='wally' pos="0 5 0" type="box" size="5.2 0.2 2.5" rgba="1 1 1 1"/>
+        <geom name='wall-y' pos="0 -5 0" type="box" size="5.2 0.2 2.5" rgba="1 1 1 1"/>
+        <geom name='wallx' pos="5 0 0" type="box" size="0.2 5.2 2.5" rgba="1 1 1 1"/>
+        <geom name='wall-x' pos="-5 0 0" type="box" size="0.2 5.2 2.5" rgba="1 1 1 1"/>
 
         <body pos="3 0 3">
             <camera mode="targetbody" target="base_link"/>

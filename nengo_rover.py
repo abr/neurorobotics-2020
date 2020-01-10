@@ -54,7 +54,7 @@ def demo():
     net = nengo.Network(seed=0)
     # create our Mujoco interface
     net.interface = Mujoco(robot_config, dt=0.001, visualize=True)
-    net.interface.connect(camera_id=-1)
+    net.interface.connect(camera_id=0)
     #net.interface.connect()
     # shorthand
     interface = net.interface
@@ -83,7 +83,7 @@ def demo():
     n_output = n_dof  # output from neural net is torque signals for the wheels
 
     subs = 4
-    steps = 2000
+    steps = 1000
     # plt.Figure()
     # net.a = []
     # for sub in range(subs):
@@ -146,14 +146,13 @@ def demo():
                 raise ExitSim()
 
             # send to mujoco, stepping the sim forward --------------------------------
-            interface.send_forces(0*np.asarray(u))
+            interface.send_forces(np.asarray(u))
 
             if net.count % 4000 == 0:
                 viewer.target = np.random.rand(3) * np.array(
                     [4, 4, 0]
                 ) - np.array([2, 2, 0])
                 viewer.target[2] = 0.4
-                viewer.target[1] = 4.5
                 interface.set_mocap_xyz("target", viewer.target)
                 print('target location: ', viewer.target)
 
