@@ -119,7 +119,7 @@ def demo():
             kp = 2
             feedback = interface.get_feedback()
             u0 = kp * (u[0]- feedback['q'][0]) - .8 * kp * feedback['dq'][0]
-            u = [u0, u[1], u[2]]
+            u = [0,0,0]
 
             if viewer.exit:
                 glfw.destroy_window(viewer.window)
