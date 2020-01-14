@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 from nengo_loihi import decode_neurons
 from abr_control.arms.mujoco_config import MujocoConfig
 from abr_control.interfaces.mujoco import Mujoco
+from abr_analyze import DataHandler
 
 
 class ExitSim(Exception):
@@ -82,79 +83,53 @@ def demo():
     n_input = 3  # input to neural net is body_com y velocity and error along (x, y) plane
     n_output = n_dof  # output from neural net is torque signals for the wheels
 
-    subs = 4
-    steps = 1000
-    # plt.Figure()
-    # net.a = []
-    # for sub in range(subs):
-    #     net.a.append(plt.subplot(2, 2, sub+1))
-    # if subs<5:
-    #     for sub in range(subs):
-    #         net.a.append(plt.subplot(subs, 1, sub+1))
-    # else:
-    #     for sub in range(subs):
-    #         net.a.append(plt.subplot(int(subs/2), 2, sub+1))
+    # max 1000 fps
+    fps = 1000
+    n_targets = 10000
+    # 1000 steps for 1 simulated second
+    # how many frames between rendered images
+    reaching_frames = int(1000/fps)
+    # how much time to reach to target before updating target
+    # if == reaching frames we update target after every rendered image
+    reaching_length = reaching_frames
+    # reaching_length = 4000
+    sim_length = reaching_length * n_targets
     imgs = []
+    # image will be 4 times img_size as this sets the resolution for one image
+    # we stitch 4 cameras together to get a 360deg fov
+    img_size = [200, 200]
+    save_fig = False
+
+    dat = DataHandler(db_name='rover_training')
+    test_name = 'training_0000'
+    dat.save(
+        data={
+                'fps': fps,
+                'reaching_length': reaching_length,
+                'sim_length': sim_length,
+                'img_size': img_size
+               },
+        save_location='%s/params' % test_name,
+        overwrite=True)
+    import timeit
+
     with net:
         net.count = 0
-        net.hits = 0
         net.imgs = []
+        start = timeit.default_timer()
         def sim_func(t, u):
-            def make_plot():
-                # plt.Figure()
-                # a = []
-                # for sub in range(subs):
-                #     a.append(plt.subplot(2, 2, sub+1))
-                # if subs<5:
-                #     for sub in range(subs):
-                #         a.append(plt.subplot(subs, 1, sub+1))
-                # else:
-                #     for sub in range(subs):
-                #         a.append(plt.subplot(int(subs/2), 2, sub+1))
-
-                # for sub in range(subs):
-                #     print('sub: ', sub)
-                #     a[sub].imshow(net.imgs[sub], origin='lower')
-                #     print(net.imgs[sub].shape)
-                # plt.show()
-                plt.Figure()
-                print('\n\n START')
-                a = np.array(np.hstack((net.imgs[0], net.imgs[1])))
-                print(a.shape)
-                print('\n\n START')
-                b = (np.hstack((net.imgs[2], net.imgs[3])))
-                print(b.shape)
-                print('\n\n START')
-                c = (np.vstack((a, b)))
-                print(c.shape)
-                # imgs = np.stack((
-                #         np.stack((net.imgs[0], net.imgs[1]), axis=1),
-                #         np.stack((net.imgs[2], net.imgs[3]), axis=1)
-                #         ), axis=0)
-                plt.imshow(c, origin='lower')
-                plt.show()
-                net.imgs = []
-                net.hits = 0
-
             kp = 2
             feedback = interface.get_feedback()
             u0 = kp * (u[0]- feedback['q'][0]) - .8 * kp * feedback['dq'][0]
             u = [u0, u[1], u[2]]
 
-            if viewer.exit:
+            if viewer.exit or net.count > sim_length:
+                print('TIME: ', timeit.default_timer() - start)
                 glfw.destroy_window(viewer.window)
                 raise ExitSim()
 
             # send to mujoco, stepping the sim forward --------------------------------
-            interface.send_forces(np.asarray(u))
-
-            if net.count % 4000 == 0:
-                viewer.target = np.random.rand(3) * np.array(
-                    [4, 4, 0]
-                ) - np.array([2, 2, 0])
-                viewer.target[2] = 0.4
-                interface.set_mocap_xyz("target", viewer.target)
-                print('target location: ', viewer.target)
+            interface.send_forces(0*np.asarray(u))
 
             # change target from red to green if within 0.02m -------------------------
             error = viewer.target - robot_config.Tx('EE')
@@ -162,7 +137,7 @@ def demo():
             #
             # error is in global coordinates, want it in local coordinates for rover --
             # body_xmat will take from local coordinates to global
-            R = np.copy(data.body_xmat[EE_id]).reshape(3, 3).T  # R.T = R^-1
+            R_raw = np.copy(data.body_xmat[EE_id]).reshape(3, 3).T  # R.T = R^-1
             # rotate it so the steering wheels point forward along y
             theta = 3 * np.pi / 2
             R90 = np.array([
@@ -170,32 +145,76 @@ def demo():
                 [np.sin(theta), np.cos(theta), 0],
                 [0, 0, 1]
             ])
-            R = np.dot(R90, R)
+            R = np.dot(R90, R_raw)
             local_error = np.dot(R, error)
 
             # we also want the egocentric velocity of the rover
-            body_com_vel = data.cvel[model.body_name2id('base_link')][3:]
-            body_com_vel = np.dot(R, body_com_vel)
+            body_com_vel_raw = data.cvel[model.body_name2id('base_link')][3:]
+            body_com_vel = np.dot(R, body_com_vel_raw)
 
             net.count += 1
             output_signal = np.hstack([body_com_vel[1], local_error[:2]])
 
-            if net.count%steps == 0:
-                #net.imgs.append(interface.sim.render(200, 200, camera_name='vision1'))
-                interface.sim.render(1920, 1080, camera_name='vision1')
-                net.imgs.append(interface.sim.render(32, 32, camera_name='vision1'))
-                net.imgs.append(interface.sim.render(32, 32, camera_name='vision2'))
-                net.imgs.append(interface.sim.render(32, 32, camera_name='vision3'))
-                net.imgs.append(interface.sim.render(32, 32, camera_name='vision4'))
-                net.hits += 4
-                if net.hits >= subs:
-                    # for sub in range(subs):
-                    #     print('sub: ', sub)
-                    #     net.a[sub].imshow(imgs[sub], origin='lower')
-                    # plt.show()
-                    print('SHOWING!!!!!')
-                    make_plot()
+            if net.count % reaching_frames == 0:
+                # get our image data
+                interface.sim.render(img_size[0], img_size[1], camera_name='vision1')
+                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision1', depth=True))
+                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision2', depth=True))
+                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision3', depth=True))
+                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision4', depth=True))
 
+                # stack image data from four cameras into one image
+                imgs = (np.vstack(
+                        (np.array(np.hstack((net.imgs[0][0], net.imgs[2][0]))),
+                         np.hstack((net.imgs[1][0], net.imgs[3][0])))
+                       ))
+
+                depths = (np.vstack(
+                        (np.array(np.hstack((net.imgs[0][1], net.imgs[2][1]))),
+                         np.hstack((net.imgs[1][1], net.imgs[3][1])))
+                       ))
+
+                # save relevant data
+                save_data={
+                        'rgb': imgs,
+                        'depth': depths,
+                        'target': viewer.target,
+                        'EE': robot_config.Tx('EE'),
+                        'EE_xmat': R_raw,
+                        'local_error': local_error,
+                        # 'cvel': body_com_vel_raw,
+                        # 'steering_output': u
+                       }
+
+                dat.save(
+                    data=save_data,
+                    save_location='%s/data/%04d' % (test_name, net.count),
+                    overwrite=True)
+
+                # save figure
+                if save_fig:
+                    plt.Figure()
+                    plt.imshow(imgs, origin='lower')
+                    plt.title('%i' % net.count)
+                    plt.savefig('images/%04d.png'%net.count)
+                    #plt.show()
+
+                net.imgs = []
+
+            # update our target
+            if net.count % reaching_length == 0:
+                phi = np.random.uniform(low=0.0, high=6.28)
+                radius = np.random.uniform(low=0.0, high=4.0)
+                viewer.target = [
+                      np.cos(phi) * radius,
+                      np.sin(phi) * radius,
+                      0.4]
+                interface.set_mocap_xyz("target", viewer.target)
+                # print('target location: ', viewer.target)
+
+            if net.count % 500 == 0:
+                print('Target Count: %i/%i ' % (int(net.count/reaching_frames), n_targets))
+                print('Time Since Start: ', timeit.default_timer() - start)
 
             return output_signal
 
@@ -280,7 +299,7 @@ if __name__ == "__main__":
                 net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
             )
         elif backend == "cpu":
-            sim = nengo.Simulator(net)
+            sim = nengo.Simulator(net, progress_bar=False)
 
         while 1:
             sim.run(1e5)
