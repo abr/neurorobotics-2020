@@ -83,9 +83,13 @@ def demo():
     n_input = 3  # input to neural net is body_com y velocity and error along (x, y) plane
     n_output = n_dof  # output from neural net is torque signals for the wheels
 
+    dist_limit = [0.5, 0.6]
+    angle_limit = [-0.4, 0.4]
+
+    collect_data = True
     # max 1000 fps
     fps = 1000
-    n_targets = 10000
+    n_targets = 1000
     # 1000 steps for 1 simulated second
     # how many frames between rendered images
     reaching_frames = int(1000/fps)
@@ -100,14 +104,16 @@ def demo():
     img_size = [200, 200]
     save_fig = False
 
-    dat = DataHandler(db_name='rover_training')
+    dat = DataHandler(db_name='rover_training_0001')
     test_name = 'training_0000'
     dat.save(
         data={
                 'fps': fps,
                 'reaching_length': reaching_length,
                 'sim_length': sim_length,
-                'img_size': img_size
+                'img_size': img_size,
+                'dist_limit': dist_limit,
+                'angle_limit': angle_limit
                },
         save_location='%s/params' % test_name,
         overwrite=True)
@@ -118,6 +124,17 @@ def demo():
         net.imgs = []
         start = timeit.default_timer()
         def sim_func(t, u):
+            # update our target
+            if net.count % reaching_length == 0:
+                phi = np.random.uniform(low=angle_limit[0], high=angle_limit[1])
+                radius = np.random.uniform(low=dist_limit[0], high=dist_limit[1])
+                viewer.target = [
+                      np.cos(phi) * radius,
+                      np.sin(phi) * radius,
+                      0.4]
+                interface.set_mocap_xyz("target", viewer.target)
+                # print('target location: ', viewer.target)
+
             kp = 2
             feedback = interface.get_feedback()
             u0 = kp * (u[0]- feedback['q'][0]) - .8 * kp * feedback['dq'][0]
@@ -155,7 +172,7 @@ def demo():
             net.count += 1
             output_signal = np.hstack([body_com_vel[1], local_error[:2]])
 
-            if net.count % reaching_frames == 0:
+            if net.count % reaching_frames == 0 and collect_data:
                 # get our image data
                 interface.sim.render(img_size[0], img_size[1], camera_name='vision1')
                 net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision1', depth=True))
@@ -200,17 +217,6 @@ def demo():
                     #plt.show()
 
                 net.imgs = []
-
-            # update our target
-            if net.count % reaching_length == 0:
-                phi = np.random.uniform(low=0.0, high=6.28)
-                radius = np.random.uniform(low=0.0, high=4.0)
-                viewer.target = [
-                      np.cos(phi) * radius,
-                      np.sin(phi) * radius,
-                      0.4]
-                interface.set_mocap_xyz("target", viewer.target)
-                # print('target location: ', viewer.target)
 
             if net.count % 500 == 0:
                 print('Target Count: %i/%i ' % (int(net.count/reaching_frames), n_targets))

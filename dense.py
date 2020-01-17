@@ -34,7 +34,7 @@ class rover_vision():
     def __init__(
         self, res=None, n_training=10000, n_validation=1000,
         seed=0, n_neurons=1000, minibatch_size=100, n_steps=1,
-        weights=None):
+        weights=None, show_resized_image=False):
 
         self.n_training = n_training
         self.n_validation = n_validation
@@ -42,6 +42,7 @@ class rover_vision():
         self.n_neurons = n_neurons
         self.minibatch_size = minibatch_size
         self.n_steps = n_steps
+        self.show_resized_image = show_resized_image
 
         # image parameters
         assert res is not None, (
@@ -51,19 +52,23 @@ class rover_vision():
 
         self.net = nengo.Network(seed=self.seed)
         #self.net.config[nengo.Ensemble].neuron_type = nengo.LIF()
+        self.net.config[nengo.Ensemble].neuron_type = nengo.RectifiedLinear()
+
+        self.net.config[nengo.Ensemble].max_rates = nengo.dists.Choice([100])
+        self.net.config[nengo.Ensemble].intercepts = nengo.dists.Choice([0])
+        self.net.config[nengo.Connection].synapse = None
+        # neuron_type = nengo.LIF(amplitude=0.01)
 
         with self.net:
             self.image_input = nengo.Node(size_out=self.img_size, output=np.zeros(self.img_size))
             self.dense_layer = nengo.Ensemble(
                 n_neurons=self.n_neurons,
                 dimensions=self.img_size)
-
-            # def output_func(t, x):
-            #     self.output = np.copy(x)
+                #intercepts=np.zeros(self.n_neurons))
 
             self.image_output = nengo.Node(size_in=3)
 
-            self.conn_learn = nengo.Connection(
+            nengo.Connection(
                 self.image_input, self.dense_layer, label='input_conn')
 
             if weights is None:
@@ -78,13 +83,12 @@ class rover_vision():
                 label='output_conn',
                 transform=weights)
 
-            self.output_probe = nengo.Probe(self.image_output, synapse=0.01)
+            self.output_probe = nengo.Probe(self.image_output, synapse=0.01, label='output_filtered')
+            self.output_probe_no_filter = nengo.Probe(self.image_output, synapse=None, label='output_no_filter')
 
-        self.sim = nengo_dl.Simulator(
-                self.net, minibatch_size=self.minibatch_size, seed=self.seed)
-
-
-    def preprocess_data(self, image_data, target_data=None, res=None, show_plot=False):
+    def preprocess_data(
+            self, image_data, target_data=None, res=None, show_resized_image=False,
+            train_scale=1):
         """
         Resizes image to desired resolution and flattens it to input to node,
         target_data gets flattened
@@ -117,14 +121,14 @@ class rover_vision():
                 interpolation=cv2.INTER_CUBIC)
 
             # visualize scaling for debugging
-            if show_plot:
+            if show_resized_image:
                 plt.Figure()
                 a = plt.subplot(121)
                 a.set_title('Original')
                 a.imshow(data, origin='lower')
                 b = plt.subplot(122)
                 b.set_title('Scaled')
-                b.imshow(rgb, origin='lower')
+                b.imshow(rgb/2 + 0.5, origin='lower')
                 plt.show()
 
             # flatten to 1D
@@ -144,7 +148,10 @@ class rover_vision():
 
             scaled_target_data = []
             for data in target_data:
-                scaled_target_data.append(data.flatten())
+                scaled_target_data.append(train_scale*data.flatten())
+            print('\nIN PREPROCESS')
+            print(data)
+            print(scaled_target_data[-1])
 
             scaled_target_data = np.asarray(scaled_target_data)
         else:
@@ -153,25 +160,19 @@ class rover_vision():
         return scaled_image_data, scaled_target_data
 
 
-    def get_weights(self):
-        return self.sim.data[self.conn_learn].weights
-
-
-    def train(self, images, targets, epochs=25, get_weights=True):
+    def train(self, images, targets, epochs=25, preprocess_images=True):
 
         # resize images and flatten all data
-        images, targets = self.preprocess_data(
-            image_data=images, target_data=targets, res=self.res, show_plot=False)
+        if preprocess_images:
+            images, targets = self.preprocess_data(
+                image_data=images, target_data=targets, res=self.res, show_resized_image=self.show_resized_image)
 
-        # Training
-        # turn off synapses for training to simplify
+        # Training, turn off synapses for training to simplify
         for conn in self.net.all_connections:
             conn.synapse = None
 
-        with self.net:
-            self.output_probe_no_filter = nengo.Probe(self.image_output)
         # increase probe filter to account for removing interal filters
-        self.output_probe.synapse = 0.04
+        # self.output_probe.synapse = 0.04
 
         # NOTE does not work with this for some reason, made a git issue
         # nengo_dl.configure_settings(trainable=False)
@@ -181,32 +182,36 @@ class rover_vision():
             self.image_input: images.reshape(
                 (self.n_training, self.n_steps, self.img_size))
         }
+        print('\n*NOTE USING FALSE DATA FOR TESTING*\n')
+        values = 1e5 * np.ones((self.n_training, self.n_steps, 3))
+        values[:,:, 0] *= -1
         training_targets_dict = {
-            self.output_probe_no_filter: targets.reshape(
-                (self.n_training, self.n_steps, 3))
+            self.output_probe_no_filter: values #targets.reshape(
+                # (self.n_training, self.n_steps, 3))
         }
 
-        self.sim = nengo_dl.Simulator(
-                self.net, minibatch_size=self.minibatch_size, seed=self.seed)
-
-        with self.sim:
-            # run the training
-            self.sim.compile(optimizer=tf.optimizers.RMSprop(0.01),
+        with nengo_dl.Simulator(self.net, minibatch_size=self.minibatch_size, seed=self.seed) as sim:
+            sim.compile(optimizer=tf.optimizers.RMSprop(0.01),
                         loss={self.output_probe_no_filter: tf.losses.mse})
-            self.sim.fit(training_images_dict, training_targets_dict, epochs=epochs)
+            #for ii in range(epochs):
+            sim.fit(training_images_dict, training_targets_dict, epochs=epochs)
+                # data = sim.predict(training_images_dict)
+                # print(data)
+            # save parameters back into net
+            sim.freeze_params(self.net)
 
-        if get_weights:
-            weights = self.get_weights()
-            return weights
+            print('TRAINING NEURONS TYPE: ', self.net.config[nengo.Ensemble].neuron_type)
 
-    def validate(self, images, targets):
+
+    def validate(self, images, targets, preprocess_images=True):
 
         def _test_mse(y_true, y_pred):
             return tf.reduce_mean(tf.square(y_pred[:, -10:] - y_true[:, -10:]))
 
         # resize images and flatten all data
-        images, targets = self.preprocess_data(
-            image_data=images, target_data=targets, res=self.res, show_plot=False)
+        if preprocess_images:
+            images, targets = self.preprocess_data(
+                image_data=images, target_data=targets, res=self.res, show_resized_image=self.show_resized_image)
 
         validation_images_dict = {
             self.image_input: images.reshape(
@@ -218,16 +223,15 @@ class rover_vision():
         }
 
 
-        self.sim = nengo_dl.Simulator(
-                self.net, minibatch_size=self.minibatch_size, seed=self.seed)
-
-        with self.sim:
+        with nengo_dl.Simulator(self.net, minibatch_size=self.minibatch_size, seed=self.seed) as sim:
             print("Validation Error:")
-            self.sim.compile(
-                loss={self.output_probe: _test_mse})
-            self.sim.evaluate(validation_images_dict, validation_targets_dict)
+            sim.compile(loss={self.output_probe: _test_mse})
+            sim.evaluate(validation_images_dict, validation_targets_dict)
+            # save parameters back into the net
+            sim.freeze_params(self.net)
 
-    def predict(self, images, stateful=False):
+
+    def predict(self, images, stateful=False, preprocess_images=True):
         """
         Parameters
         ----------
@@ -245,27 +249,36 @@ class rover_vision():
         images = np.asarray(images)
         if images.ndim == 3:
             n_images = 1
-        elif images.ndim == 4:
+        else: #elif images.ndim == 4:
             n_images = images.shape[0]
+        # already processed / flattened
+        # elif not preprocess_images:
+        #     n_images = images.shape[0]
 
         # resize images and flatten all data
-        images, _ = self.preprocess_data(
-            image_data=images, res=self.res, show_plot=False)
+        if preprocess_images:
+            images, _ = self.preprocess_data(
+                image_data=images, res=self.res, show_resized_image=self.show_resized_image)
 
         prediction_images_dict = {
             self.image_input: images.reshape(
                 (n_images, self.n_steps, self.img_size))
         }
-        self.sim = nengo_dl.Simulator(
-                self.net, minibatch_size=self.minibatch_size, seed=self.seed)
-        predictions = self.sim.predict(
-            prediction_images_dict, n_steps=self.n_steps, stateful=stateful)
+
+        with nengo_dl.Simulator(self.net, minibatch_size=self.minibatch_size, seed=self.seed) as sim:
+            predictions = sim.predict(prediction_images_dict, n_steps=self.n_steps, stateful=stateful)
+
+            print('PREDICT NEURONS TYPE: ', self.net.config[nengo.Ensemble].neuron_type)
 
         return predictions
 
     def plot_results(self, predictions, targets, image_nums=None):
         predictions = np.asarray(predictions).squeeze()
         targets = np.asarray(targets).squeeze()
+
+
+        print('\nIN PLOT')
+        print(targets[-1, :])
 
         fig = plt.Figure()
 
@@ -287,6 +300,7 @@ class rover_vision():
         z.plot(predictions[:, 2], label='Pred', color='k', linestyle='--')
 
         plt.legend()
+        plt.savefig('prediction_results.png')
         plt.show()
 
         if image_nums is not None:
@@ -301,17 +315,17 @@ class rover_vision():
             # b.imshow(rgb2, origin='lower')
 
 
-
-
 if __name__ == '__main__':
     from abr_analyze import DataHandler
-    dat = DataHandler('rover_training')
+    dat = DataHandler('rover_training_0001')
 
     n_training = 10000
     n_validation = 1000
+    epochs = 10
+    res=[64, 64]
 
-    rover = rover_vision(res=[64, 64], n_training=n_training, n_validation=n_validation,
-        seed=0, n_neurons=1000, minibatch_size=100, n_steps=1)
+    rover = rover_vision(res=res, n_training=n_training, n_validation=n_validation,
+        seed=0, n_neurons=1000, minibatch_size=1000, n_steps=1, show_resized_image=False)
 
     print('\nTRAINING')
     training_images = []
@@ -321,12 +335,17 @@ if __name__ == '__main__':
         training_images.append(data['rgb'])
         training_targets.append(data['local_error'])
 
-    weights = rover.train(
+    training_images, training_targets = rover.preprocess_data(
+        image_data=training_images, target_data=training_targets,
+        res=res, show_resized_image=False)
+
+    rover.train(
         images=training_images,
         targets=training_targets,
-        get_weights=True,
-        epochs=10)
-    dat.save(data={'weights': weights}, save_location='prediction_0000/data/weights', overwrite=True)
+        epochs=epochs,
+        preprocess_images=False)
+
+    # dat.save(data={'weights': weights}, save_location='prediction_0000/data/weights', overwrite=True)
 
     print('\nVALIDATION')
     validation_images = []
@@ -335,9 +354,12 @@ if __name__ == '__main__':
         data = dat.load(parameters=['rgb', 'local_error'], save_location='validation_0000/data/%04d' % nn)
         validation_images.append(data['rgb'])
         validation_targets.append(data['local_error'])
+    validation_images, validation_targets = rover.preprocess_data(
+        image_data=validation_images, target_data=validation_targets,
+        res=res, show_resized_image=False)
 
-    rover.validate(images=validation_images, targets=validation_targets)
-
+    # rover.validate(images=validation_images, targets=validation_targets, preprocess_images=False)
+    #
     print('\nPREDICTION')
-    predictions = rover.predict(images=validation_images)[rover.output_probe]
-    rover.plot_results(predictions=predictions, targets=validation_targets)
+    predictions = rover.predict(images=training_images, preprocess_images=False)[rover.output_probe]
+    rover.plot_results(predictions=predictions, targets=training_targets)
