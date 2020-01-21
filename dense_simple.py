@@ -33,32 +33,37 @@ res=[1, 10]
 pixels = res[0] * res[1]
 subpixels = pixels*3
 seed = 0
+np.random.seed(seed)
 
 # generate data
-training_images = []
-training_targets = []
 training_angle_targets = []
 zeros = np.zeros((res[0], res[1], 3))
 targets = np.linspace(-3.14, 3.14, pixels)
 assert output_dims == 1
 
-for ii in range(0, n_training):
-    index = np.random.randint(low=0, high=pixels)
-    data = np.copy(zeros)
-    data[0][index] = [1, 0, 0]
-    # plt.figure()
-    # plt.imshow(data)
-    # plt.show()
-    data = np.asarray(data).flatten()
-    angle = get_angle(data)
-    training_angle_targets.append(angle)
-    training_images.append(data)
-    training_targets.append(index)
-    # if np.isnan(np.array(training_angle_targets
-    #
-training_images = np.asarray(training_images)
-#training_targets = np.array(training_targets)
-training_targets = np.array(training_angle_targets)
+def gen_data(n_images):
+    images = []
+    targets = []
+    for ii in range(0, n_images):
+        index = np.random.randint(low=0, high=pixels)
+        data = np.copy(zeros)
+        data[0][index] = [1, 0, 0]
+        # plt.figure()
+        # plt.imshow(data)
+        # plt.show()
+        data = np.asarray(data).flatten()
+        angle = get_angle(data)
+        training_angle_targets.append(angle)
+        images.append(data)
+        #targets.append(index)
+
+    images = np.asarray(images)
+    #targets = np.array(targets)
+    targets = np.array(training_angle_targets)
+    return images, targets
+
+training_images, training_targets = gen_data(n_training)
+validation_images, validation_targets = gen_data(n_validation)
 
 # Define network
 net = nengo.Network(seed=seed)
@@ -128,17 +133,14 @@ with net:
 
 with nengo_dl.Simulator(net, minibatch_size=minibatch_size, seed=seed) as sim:
 
-    # def _test_mse(y_true, y_pred):
-    #     return tf.reduce_mean(tf.square(y_pred[:, -10:] - y_true[:, -10:]))
-    #
-    # print('Evaluation Before Training:')
-    # sim.compile(loss={output_probe: _test_mse})
-    # sim.evaluate(training_images_dict, training_targets_dict)
-    #
-
     training_images_dict = {
         image_input: training_images.reshape(
             (n_training, n_steps, subpixels))
+    }
+
+    validation_images_dict = {
+        image_input: validation_images.reshape(
+            (n_validation, n_steps, subpixels))
     }
 
     if learn_func:
@@ -155,24 +157,18 @@ with nengo_dl.Simulator(net, minibatch_size=minibatch_size, seed=seed) as sim:
         sim.fit(training_images_dict, training_targets_dict, epochs=epochs)
         # save parameters back into net
         sim.freeze_params(net)
-    #
-    # print('Evaluation Before Training:')
-    # sim.compile(loss={output_probe: _test_mse})
-    # sim.evaluate(training_images_dict, training_targets_dict)
-    # print('TRAINING NEURONS TYPE: ', net.config[nengo.Ensemble].neuron_type)
-
 
     # input is flattened, so total_pixels / pixels(per image)
     batch_size = int(training_images.shape[0]/pixels)
 
-    predictions = sim.predict(training_images_dict, n_steps=n_steps, stateful=False)[output_probe]
+    #predictions = sim.predict(training_images_dict, n_steps=n_steps, stateful=False)[output_probe]
+    predictions = sim.predict(validation_images_dict, n_steps=n_steps, stateful=False)[output_probe]
     predictions = np.asarray(predictions).squeeze()
 
     fig = plt.Figure()
-    #plt.plot(sorted(training_targets), label='target', color='r')
-    plt.plot(training_angle_targets[-100:], label='target', color='r')
+    #plt.plot(training_targets[-100:], label='target', color='r')
+    plt.plot(validation_targets[-100:], label='target', color='r')
     plt.plot(predictions[-100:], label='predictions', color='k', linestyle='--')
-    #plt.plot(-1*training_angle_targets[-100:], label='target', color='g')
     plt.legend()
     plt.savefig('prediction_results.png')
     plt.show()
