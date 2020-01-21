@@ -23,12 +23,12 @@ def get_angle(image):
 
 warnings.simplefilter("ignore")
 n_steps = 1
-n_training = 100
+n_training = 10000
 minibatch_size = 100 #int(n_training/100)
 n_validation = 1000
 output_dims = 1
-n_neurons = 1000
-epochs = 10
+n_neurons = 10000
+epochs = 5
 res=[1, 10]
 pixels = res[0] * res[1]
 subpixels = pixels*3
@@ -54,9 +54,11 @@ for ii in range(0, n_training):
     training_angle_targets.append(angle)
     training_images.append(data)
     training_targets.append(index)
-
+    # if np.isnan(np.array(training_angle_targets
+    #
 training_images = np.asarray(training_images)
-training_targets = np.array(training_targets)
+#training_targets = np.array(training_targets)
+training_targets = np.array(training_angle_targets)
 
 # Define network
 net = nengo.Network(seed=seed)
@@ -65,6 +67,8 @@ net.config[nengo.Ensemble].neuron_type = nengo.RectifiedLinear()
 net.config[nengo.Ensemble].max_rates = nengo.dists.Choice([100])
 net.config[nengo.Ensemble].intercepts = nengo.dists.Choice([0])
 net.config[nengo.Connection].synapse = None
+
+learn_func = True
 
 with net:
     print('\n\nsubpixels: ', subpixels)
@@ -79,19 +83,20 @@ with net:
     nengo.Connection(
         image_input, dense_layer, label='input_conn')
 
-    # weights = np.zeros((output_dims, dense_layer.n_neurons))
-    #
-    # nengo.Connection(
-    #     dense_layer.neurons,
-    #     image_output,
-    #     label='output_conn',
-    #     transform=weights)
+    if learn_func:
+        weights = np.zeros((output_dims, dense_layer.n_neurons))
 
-    nengo.Connection(
-        dense_layer,
-        image_output,
-        label='output_conn',
-        function=get_angle)
+        nengo.Connection(
+            dense_layer.neurons,
+            image_output,
+            label='output_conn',
+            transform=weights)
+    else:
+        nengo.Connection(
+            dense_layer,
+            image_output,
+            label='output_conn',
+            function=get_angle)
 
     #input_probe = nengo.Probe(image_input)
     output_probe = nengo.Probe(image_output, synapse=None, label='output_filtered')
@@ -123,17 +128,6 @@ with net:
 
 with nengo_dl.Simulator(net, minibatch_size=minibatch_size, seed=seed) as sim:
 
-    training_images_dict = {
-        image_input: training_images.reshape(
-            (n_training, n_steps, subpixels))
-    }
-
-    # training_targets_dict = {
-    #     #output_probe_no_filter: training_targets.reshape(
-    #     output_probe: training_targets.reshape(
-    #         (n_training, n_steps, output_dims))
-    #     }
-
     # def _test_mse(y_true, y_pred):
     #     return tf.reduce_mean(tf.square(y_pred[:, -10:] - y_true[:, -10:]))
     #
@@ -141,13 +135,26 @@ with nengo_dl.Simulator(net, minibatch_size=minibatch_size, seed=seed) as sim:
     # sim.compile(loss={output_probe: _test_mse})
     # sim.evaluate(training_images_dict, training_targets_dict)
     #
-    # print('Training')
-    # sim.compile(optimizer=tf.optimizers.RMSprop(0.01),
-    #             # loss={output_probe_no_filter: tf.losses.mse})
-    #             loss={output_probe: tf.losses.mse})
-    # sim.fit(training_images_dict, training_targets_dict, epochs=epochs)
-    # # save parameters back into net
-    # sim.freeze_params(net)
+
+    training_images_dict = {
+        image_input: training_images.reshape(
+            (n_training, n_steps, subpixels))
+    }
+
+    if learn_func:
+        training_targets_dict = {
+            #output_probe_no_filter: training_targets.reshape(
+            output_probe: training_targets.reshape(
+                (n_training, n_steps, output_dims))
+            }
+
+        print('Training')
+        sim.compile(optimizer=tf.optimizers.RMSprop(0.01),
+                    # loss={output_probe_no_filter: tf.losses.mse})
+                    loss={output_probe: tf.losses.mse})
+        sim.fit(training_images_dict, training_targets_dict, epochs=epochs)
+        # save parameters back into net
+        sim.freeze_params(net)
     #
     # print('Evaluation Before Training:')
     # sim.compile(loss={output_probe: _test_mse})
@@ -163,8 +170,9 @@ with nengo_dl.Simulator(net, minibatch_size=minibatch_size, seed=seed) as sim:
 
     fig = plt.Figure()
     #plt.plot(sorted(training_targets), label='target', color='r')
-    plt.plot(training_angle_targets, label='target', color='r')
-    plt.plot(predictions, label='predictions', color='k')
+    plt.plot(training_angle_targets[-100:], label='target', color='r')
+    plt.plot(predictions[-100:], label='predictions', color='k', linestyle='--')
+    #plt.plot(-1*training_angle_targets[-100:], label='target', color='g')
     plt.legend()
     plt.savefig('prediction_results.png')
     plt.show()
