@@ -34,7 +34,7 @@ class rover_vision():
     def __init__(
         self, res=None, n_training=10000, n_validation=1000,
         seed=0, n_neurons=1000, minibatch_size=100, n_steps=1,
-        weights=None, show_resized_image=False):
+        weights=None, show_resized_image=False, output_dims=3):
 
         self.n_training = n_training
         self.n_validation = n_validation
@@ -49,6 +49,7 @@ class rover_vision():
             "Require resolution of images, or the desired scaled resolution")
         self.res = res
         self.img_size = res[0] * res[1] * 3
+        self.output_dims = output_dims
 
         self.net = nengo.Network(seed=self.seed)
         #self.net.config[nengo.Ensemble].neuron_type = nengo.LIF()
@@ -66,13 +67,13 @@ class rover_vision():
                 dimensions=self.img_size)
                 #intercepts=np.zeros(self.n_neurons))
 
-            self.image_output = nengo.Node(size_in=3)
+            self.image_output = nengo.Node(size_in=self.output_dims)
 
             nengo.Connection(
                 self.image_input, self.dense_layer, label='input_conn')
 
             if weights is None:
-                weights = np.zeros((3, self.dense_layer.n_neurons))
+                weights = np.zeros((self.output_dims, self.dense_layer.n_neurons))
                 print('**No weights passed in, starting with zeros**')
             else:
                 print('**Using pretrained weights**')
@@ -83,7 +84,13 @@ class rover_vision():
                 label='output_conn',
                 transform=weights)
 
-            self.output_probe = nengo.Probe(self.image_output, synapse=0.01, label='output_filtered')
+            # nengo.Connection(
+            #     self.dense_layer,
+            #     self.image_output,
+            #     label='output_conn',
+            #     function=np.arccos)
+
+            self.output_probe = nengo.Probe(self.image_output, synapse=None, label='output_filtered')
             self.output_probe_no_filter = nengo.Probe(self.image_output, synapse=None, label='output_no_filter')
 
     def preprocess_data(
@@ -132,10 +139,11 @@ class rover_vision():
                 plt.show()
 
             # flatten to 1D
+            #NOTE should use np.ravel to maintain image order
             rgb = rgb.flatten()
             scaled_image_data.append(rgb)
 
-        scaled_image_data = np.asarray(scaled_image_data)
+        scaled_image_data = np.asarray(scaled_image_data).flatten()
 
         if target_data is not None:
             target_data = np.asarray(target_data)
@@ -182,13 +190,17 @@ class rover_vision():
             self.image_input: images.reshape(
                 (self.n_training, self.n_steps, self.img_size))
         }
-        print('\n*NOTE USING FALSE DATA FOR TESTING*\n')
-        values = 1e5 * np.ones((self.n_training, self.n_steps, 3))
-        values[:,:, 0] *= -1
+        # print('\n*NOTE USING FALSE DATA FOR TESTING*\n')
+        # values = 1e5 * np.ones((self.n_training, self.n_steps, 3))
+        # values[:,:, 0] *= -1
+        # training_targets_dict = {
+        #     self.output_probe_no_filter: values
+        # }
+
         training_targets_dict = {
-            self.output_probe_no_filter: values #targets.reshape(
-                # (self.n_training, self.n_steps, 3))
-        }
+            self.output_probe_no_filter: targets.reshape(
+                (self.n_training, self.n_steps, self.output_dims))
+            }
 
         with nengo_dl.Simulator(self.net, minibatch_size=self.minibatch_size, seed=self.seed) as sim:
             sim.compile(optimizer=tf.optimizers.RMSprop(0.01),
@@ -219,7 +231,7 @@ class rover_vision():
         }
         validation_targets_dict = {
             self.output_probe: targets.reshape(
-                (self.n_validation, self.n_steps, 3))
+                (self.n_validation, self.n_steps, self.output_dims))
         }
 
 
@@ -247,13 +259,16 @@ class rover_vision():
         # TODO think of a consistent way to get this value, maybe assert that
         # the batch size is always the first dim for data?
         images = np.asarray(images)
-        if images.ndim == 3:
-            n_images = 1
-        else: #elif images.ndim == 4:
-            n_images = images.shape[0]
-        # already processed / flattened
-        # elif not preprocess_images:
-        #     n_images = images.shape[0]
+        print(images)
+        if images.ndim != 1:
+            print('inputting %i dim for images' % images.ndim)
+            print(images.shape)
+            assert preprocess_images is True, (
+                'Nengo requires flattened inputs, set preprocess to True or flatten the'
+                + ' images manually before running prediction')
+        else:
+            # input is flattened, so img_size * n_predict_images
+            batch_size = int(images.shape[0]/self.img_size)
 
         # resize images and flatten all data
         if preprocess_images:
@@ -262,7 +277,7 @@ class rover_vision():
 
         prediction_images_dict = {
             self.image_input: images.reshape(
-                (n_images, self.n_steps, self.img_size))
+                (batch_size, self.n_steps, self.img_size))
         }
 
         with nengo_dl.Simulator(self.net, minibatch_size=self.minibatch_size, seed=self.seed) as sim:
@@ -277,31 +292,40 @@ class rover_vision():
         targets = np.asarray(targets).squeeze()
 
 
-        print('\nIN PLOT')
-        print(targets[-1, :])
+        # print('\nIN PLOT')
+        # print(targets[-1, :])
 
         fig = plt.Figure()
+        if targets.ndim == 2:
+            x = plt.subplot(311)
+            x.set_title('X')
+            x.plot(targets[:, 0], label='Target', color='r')
+            x.plot(predictions[:, 0], label='Pred', color='k', linestyle='--')
+            plt.legend()
 
-        x = plt.subplot(311)
-        x.set_title('X')
-        x.plot(targets[:, 0], label='Target', color='r')
-        x.plot(predictions[:, 0], label='Pred', color='k', linestyle='--')
-        plt.legend()
+            y = plt.subplot(312)
+            y.set_title('Y')
+            y.plot(targets[:, 1], label='Target', color='g')
+            y.plot(predictions[:, 1], label='Pred', color='k', linestyle='--')
+            plt.legend()
 
-        y = plt.subplot(312)
-        y.set_title('Y')
-        y.plot(targets[:, 1], label='Target', color='g')
-        y.plot(predictions[:, 1], label='Pred', color='k', linestyle='--')
-        plt.legend()
+            z = plt.subplot(313)
+            z.set_title('Z')
+            z.plot(targets[:, 2], label='Target', color='b')
+            z.plot(predictions[:, 2], label='Pred', color='k', linestyle='--')
 
-        z = plt.subplot(313)
-        z.set_title('Z')
-        z.plot(targets[:, 2], label='Target', color='b')
-        z.plot(predictions[:, 2], label='Pred', color='k', linestyle='--')
+            plt.legend()
+            plt.savefig('prediction_results.png')
+            plt.show()
 
-        plt.legend()
-        plt.savefig('prediction_results.png')
-        plt.show()
+        elif targets.ndim == 1:
+            plt.plot(targets, label='target', color='r')
+            plt.plot(predictions, label='predictions', color='k')
+            plt.legend()
+            plt.savefig('prediction_results.png')
+            plt.show()
+        else:
+            raise Exception ('targets have unexpected shape ', targets.shape)
 
         if image_nums is not None:
             raise NotImplementedError
@@ -319,26 +343,71 @@ if __name__ == '__main__':
     from abr_analyze import DataHandler
     dat = DataHandler('rover_training_0001')
 
-    n_training = 10000
+    simple_images = True
+    n_training = 1000
     n_validation = 1000
     epochs = 10
     res=[64, 64]
+    output_dims = 3
+    if simple_images:
+        res=[1, 10]
+        output_dims = 1
 
+    # instantiate vision class
     rover = rover_vision(res=res, n_training=n_training, n_validation=n_validation,
-        seed=0, n_neurons=1000, minibatch_size=1000, n_steps=1, show_resized_image=False)
+        seed=0, n_neurons=1000, minibatch_size=1000, n_steps=1, show_resized_image=False,
+        output_dims=output_dims)
+
+    if not simple_images:
+        # load training images
+        training_images = []
+        training_targets = []
+        for nn in range(1, n_training+1):
+            data = dat.load(parameters=['rgb', 'local_error'], save_location='training_0000/data/%04d' % nn)
+            training_images.append(data['rgb'])
+            training_targets.append(data['local_error'])
+
+        # scale image resolution
+        training_images, training_targets = rover.preprocess_data(
+            image_data=training_images, target_data=training_targets,
+            res=res, show_resized_image=False)
+
+
+        # scale validation images
+        validation_images = []
+        validation_targets = []
+        for nn in range(1, n_validation+1):
+            data = dat.load(parameters=['rgb', 'local_error'], save_location='validation_0000/data/%04d' % nn)
+            validation_images.append(data['rgb'])
+            validation_targets.append(data['local_error'])
+        validation_images, validation_targets = rover.preprocess_data(
+            image_data=validation_images, target_data=validation_targets,
+            res=res, show_resized_image=False)
+
+    else:
+        training_images = []
+        training_targets = []
+        n_pts = res[0]*res[1]
+        zeros = np.zeros((res[0], res[1], 3))
+        targets = np.linspace(-3.14, 3.14, n_pts)
+        assert output_dims == 1
+
+        for ii in range(0, n_training):
+            index = np.random.randint(low=0, high=n_pts)
+            data = np.copy(zeros)
+            data[0][index] = [1, 0, 0]
+            # plt.figure()
+            # plt.title(index)
+            # plt.imshow(data)
+            # plt.show()
+            training_images.append(data)
+            #training_targets.append(targets[index])
+            training_targets.append(index)
+
+        training_images = np.array(training_images).flatten()
+        training_targets = np.array(training_targets)
 
     print('\nTRAINING')
-    training_images = []
-    training_targets = []
-    for nn in range(1, n_training+1):
-        data = dat.load(parameters=['rgb', 'local_error'], save_location='training_0000/data/%04d' % nn)
-        training_images.append(data['rgb'])
-        training_targets.append(data['local_error'])
-
-    training_images, training_targets = rover.preprocess_data(
-        image_data=training_images, target_data=training_targets,
-        res=res, show_resized_image=False)
-
     rover.train(
         images=training_images,
         targets=training_targets,
@@ -347,19 +416,9 @@ if __name__ == '__main__':
 
     # dat.save(data={'weights': weights}, save_location='prediction_0000/data/weights', overwrite=True)
 
-    print('\nVALIDATION')
-    validation_images = []
-    validation_targets = []
-    for nn in range(1, n_validation+1):
-        data = dat.load(parameters=['rgb', 'local_error'], save_location='validation_0000/data/%04d' % nn)
-        validation_images.append(data['rgb'])
-        validation_targets.append(data['local_error'])
-    validation_images, validation_targets = rover.preprocess_data(
-        image_data=validation_images, target_data=validation_targets,
-        res=res, show_resized_image=False)
-
+    # print('\nVALIDATION')
     # rover.validate(images=validation_images, targets=validation_targets, preprocess_images=False)
-    #
+
     print('\nPREDICTION')
     predictions = rover.predict(images=training_images, preprocess_images=False)[rover.output_probe]
     rover.plot_results(predictions=predictions, targets=training_targets)
