@@ -84,12 +84,14 @@ def demo():
     n_output = n_dof  # output from neural net is torque signals for the wheels
 
     dist_limit = [0.5, 0.6]
-    angle_limit = [-0.4, 0.4]
+    #angle_limit = [-0.4, 0.4]
+    angle_limit = [-np.pi, np.pi]
 
     collect_data = True
+    save_fig = False
     # max 1000 fps
     fps = 1000
-    n_targets = 1000
+    n_targets = 30000
     # 1000 steps for 1 simulated second
     # how many frames between rendered images
     reaching_frames = int(1000/fps)
@@ -101,10 +103,9 @@ def demo():
     imgs = []
     # image will be 4 times img_size as this sets the resolution for one image
     # we stitch 4 cameras together to get a 360deg fov
-    img_size = [200, 200]
-    save_fig = False
+    img_size = [100, 100]
 
-    dat = DataHandler(db_name='rover_training_0001')
+    dat = DataHandler(db_name='rover_training_0003')
     test_name = 'training_0000'
     dat.save(
         data={
@@ -124,14 +125,19 @@ def demo():
         net.imgs = []
         start = timeit.default_timer()
         def sim_func(t, u):
+            if viewer.exit or net.count >= sim_length:
+                print('TIME: ', timeit.default_timer() - start)
+                glfw.destroy_window(viewer.window)
+                raise ExitSim()
+
             # update our target
             if net.count % reaching_length == 0:
                 phi = np.random.uniform(low=angle_limit[0], high=angle_limit[1])
                 radius = np.random.uniform(low=dist_limit[0], high=dist_limit[1])
                 viewer.target = [
-                      np.cos(phi) * radius,
-                      np.sin(phi) * radius,
-                      0.4]
+                    np.cos(phi) * radius,
+                    np.sin(phi) * radius,
+                    0.4]
                 interface.set_mocap_xyz("target", viewer.target)
                 # print('target location: ', viewer.target)
 
@@ -139,11 +145,6 @@ def demo():
             feedback = interface.get_feedback()
             u0 = kp * (u[0]- feedback['q'][0]) - .8 * kp * feedback['dq'][0]
             u = [u0, u[1], u[2]]
-
-            if viewer.exit or net.count > sim_length:
-                print('TIME: ', timeit.default_timer() - start)
-                glfw.destroy_window(viewer.window)
-                raise ExitSim()
 
             # send to mujoco, stepping the sim forward --------------------------------
             interface.send_forces(0*np.asarray(u))
@@ -169,10 +170,9 @@ def demo():
             body_com_vel_raw = data.cvel[model.body_name2id('base_link')][3:]
             body_com_vel = np.dot(R, body_com_vel_raw)
 
-            net.count += 1
             output_signal = np.hstack([body_com_vel[1], local_error[:2]])
 
-            if net.count % reaching_frames == 0 and collect_data:
+            if net.count % reaching_frames == 0 and (collect_data or save_fig):
                 # get our image data
                 interface.sim.render(img_size[0], img_size[1], camera_name='vision1')
                 net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision1', depth=True))
@@ -181,32 +181,35 @@ def demo():
                 net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision4', depth=True))
 
                 # stack image data from four cameras into one image
-                imgs = (np.vstack(
-                        (np.array(np.hstack((net.imgs[0][0], net.imgs[2][0]))),
-                         np.hstack((net.imgs[1][0], net.imgs[3][0])))
+                imgs = (np.hstack(
+                        (np.array(
+                            np.hstack((net.imgs[3][0], net.imgs[0][0]))),
+                            np.hstack((net.imgs[2][0], net.imgs[1][0])))
                        ))
 
-                depths = (np.vstack(
-                        (np.array(np.hstack((net.imgs[0][1], net.imgs[2][1]))),
-                         np.hstack((net.imgs[1][1], net.imgs[3][1])))
+                depths = (np.hstack(
+                        (np.array(
+                            np.hstack((net.imgs[3][1], net.imgs[0][1]))),
+                            np.hstack((net.imgs[2][1], net.imgs[1][1])))
                        ))
 
                 # save relevant data
-                save_data={
-                        'rgb': imgs,
-                        'depth': depths,
-                        'target': viewer.target,
-                        'EE': robot_config.Tx('EE'),
-                        'EE_xmat': R_raw,
-                        'local_error': local_error,
-                        # 'cvel': body_com_vel_raw,
-                        # 'steering_output': u
-                       }
+                if collect_data:
+                    save_data={
+                            'rgb': imgs,
+                            'depth': depths,
+                            'target': viewer.target,
+                            'EE': robot_config.Tx('EE'),
+                            'EE_xmat': R_raw,
+                            'local_error': local_error,
+                            # 'cvel': body_com_vel_raw,
+                            # 'steering_output': u
+                        }
 
-                dat.save(
-                    data=save_data,
-                    save_location='%s/data/%04d' % (test_name, net.count),
-                    overwrite=True)
+                    dat.save(
+                        data=save_data,
+                        save_location='%s/data/%04d' % (test_name, net.count),
+                        overwrite=True)
 
                 # save figure
                 if save_fig:
@@ -222,6 +225,7 @@ def demo():
                 print('Target Count: %i/%i ' % (int(net.count/reaching_frames), n_targets))
                 print('Time Since Start: ', timeit.default_timer() - start)
 
+            net.count += 1
             return output_signal
 
         # -----------------------------------------------------------------------------
