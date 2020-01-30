@@ -30,7 +30,8 @@ def run_everything(single_ens):
         angle = angle*2
         return angle, norm_index
 
-    def preprocess_data(image_data, res, show_resized_image, rows=None, debug=False):
+    def preprocess_data(
+            image_data, res, show_resized_image, rows=None, debug=False, flatten=True):
         # single image, append 1 dimension so we can loop through the same way
         image_data = np.asarray(image_data)
         if image_data.ndim == 3:
@@ -73,7 +74,8 @@ def run_everything(single_ens):
 
             # flatten to 1D
             #NOTE should use np.ravel to maintain image order
-            rgb = rgb.flatten()
+            if flatten:
+                rgb = rgb.flatten()
             # scale image from -1 to 1 and save to list
             scaled_image_data.append(rgb*2 - 1)
 
@@ -103,7 +105,9 @@ def run_everything(single_ens):
         return scaled_image_data, scaled_target_data
 
 
-    def load_data(res, db_name, label='training_0000', n_imgs=None, rows=None, debug=False, show_resized_image=False):
+    def load_data(
+            res, db_name, label='training_0000', n_imgs=None, rows=None, debug=False, show_resized_image=False,
+            flatten=True):
         dat = DataHandler(db_name)
 
         # load training images
@@ -117,7 +121,8 @@ def run_everything(single_ens):
         # scale image resolution
         training_images, training_targets = preprocess_data(
             image_data=training_images, debug=debug,
-            res=res, show_resized_image=show_resized_image, rows=rows)
+            res=res, show_resized_image=show_resized_image, rows=rows,
+            flatten=flatten)
 
         return training_images, training_targets
 
@@ -170,7 +175,7 @@ def run_everything(single_ens):
     gain = 100
     bias = 0
     # resolution to scale images to
-    res=[10, 64]
+    res=[64, 64]
     # select a subset of rows of the image to use, these will be used to index into the array
     # rows = [27, 28]
     rows = None
@@ -178,13 +183,16 @@ def run_everything(single_ens):
     subpixels = pixels*3
     seed = 0
     np.random.seed(seed)
+    flatten = True
+    if use_keras:
+        flatten = False
 
     # use training data in validation step
     # validate_with_training = False
 
     #save_name = 'image_input-to-dense_layer_neurons-norm_input_weights_10k-gain_bias'
     # save_name = 'version_that_works_specifying_enc_30k'
-    save_name = 'dense_neurons-to-dense_layer'
+    save_name = '3conv_1dense'
     params_file = 'saved_net_%ix%i' % (res[0], res[1])
     if use_keras:
         save_folder = 'data/%s/keras/%s/%s' % (db_name, params_file, save_name)
@@ -197,8 +205,7 @@ def run_everything(single_ens):
     notes = (
     '''
     \n- bias initializer on input to neurons set to zeros
-    \n- scale input_weights by gain
-    \n- adding another layer to go from input to neuron space
+    \n- 3 conv layers 1 dense
     '''
             )
     # '''
@@ -234,7 +241,8 @@ def run_everything(single_ens):
     # load data
     training_images, training_targets = load_data(
         res=res, label='training_0000', n_imgs=n_training, rows=rows,
-        debug=debug, show_resized_image=show_resized_image, db_name=db_name)
+        debug=debug, show_resized_image=show_resized_image, db_name=db_name,
+        flatten=flatten)
 
     # if validate_with_training:
     #     # images are flattened at this point, need to find how
@@ -246,10 +254,13 @@ def run_everything(single_ens):
     # else:
     validation_images, validation_targets = load_data(
         res=res, label='validation_0000', n_imgs=n_validation, rows=rows,
-        debug=debug, show_resized_image=show_resized_image, db_name=db_name)
+        debug=debug, show_resized_image=show_resized_image, db_name=db_name,
+        flatten=flatten)
 
     test_print = ('Running tests for %s' % save_folder)
     print('\n')
+    print('Training Images: ', training_images.shape)
+    print('Validation Images: ', validation_images.shape)
     print('-'*len(test_print))
     print(test_print)
     print('-'*len(test_print))
@@ -343,41 +354,48 @@ def run_everything(single_ens):
                     conn.synapse = None
 
     else:
-        image_input = tf.keras.Input(subpixels, batch_size=minibatch_size)
+        image_input = tf.keras.Input(shape=(res[0], res[1], 3), batch_size=minibatch_size)
 
-        # dense_node = tf.keras.layers.Dense(
-        #     units=subpixels,
-        #     )(image_input)
-
-        weights_in = nengo.dists.UniformHypersphere(
-            surface=True).sample(n_neurons, subpixels, rng=np.random.RandomState(seed=0))
-        # linearly combine with our gain
-        weights_in *= gain
-
-        dense_neurons = tf.keras.layers.Dense(
-            units=n_neurons,
-            use_bias=False,
-            kernel_initializer=keras.initializers.Constant(weights_in)
-            # bias_initializer=keras.initializers.Zeros()
+        conv1 = tf.keras.layers.Conv2D(
+            filters=32,
+            kernel_size=3,
+            strides=1,
+            use_bias=True,
+            activation=tf.nn.relu,
+            # kernel_initializer=keras.initializers.Zeros(),
+            data_format="channels_last",
+            # padding='same'
             )(image_input)
 
-        weights_in = nengo.dists.UniformHypersphere(
-            surface=True).sample(n_neurons, n_neurons, rng=np.random.RandomState(seed=0))
-        # linearly combine with our gain
-        weights_in *= gain
-
-        dense_layer = tf.keras.layers.Dense(
-            units=n_neurons,
+        conv2 = tf.keras.layers.Conv2D(
+            filters=64,
+            kernel_size=3,
+            strides=1,
+            use_bias=True,
             activation=tf.nn.relu,
-            kernel_initializer=keras.initializers.Constant(weights_in),
-            bias_initializer=keras.initializers.Zeros()
-        )(dense_neurons)
+            # kernel_initializer=keras.initializers.Zeros(),
+            data_format="channels_last",
+            # padding='same'
+            )(conv1)
+
+        conv3 = tf.keras.layers.Conv2D(
+            filters=128,
+            kernel_size=3,
+            strides=1,
+            use_bias=True,
+            activation=tf.nn.relu,
+            # kernel_initializer=keras.initializers.Zeros(),
+            data_format="channels_last",
+            # padding='same'
+            )(conv2)
+
+        flatten = tf.keras.layers.Flatten()(conv3)
 
         output_probe = tf.keras.layers.Dense(
             units=output_dims,
             use_bias=False,
             kernel_initializer=keras.initializers.Zeros()
-            )(dense_layer)
+            )(flatten)
 
         model = tf.keras.Model(inputs=image_input, outputs=output_probe)
 
