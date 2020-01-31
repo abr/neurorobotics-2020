@@ -10,6 +10,7 @@ import os
 import time
 from abr_analyze import DataHandler
 import tensorflow as tf
+import math
 
 def run_everything(single_ens):
     def get_angle(image):
@@ -31,7 +32,10 @@ def run_everything(single_ens):
         return angle, norm_index
 
     def preprocess_data(
-            image_data, res, show_resized_image, rows=None, debug=False, flatten=True):
+            image_data, res, show_resized_image, rows=None, debug=False, flatten=True, local_error=None):
+        #NOTE if no local error is passed in, the image is scanned for red pixels to determine the target angle
+        # else atan2 is used
+
         # single image, append 1 dimension so we can loop through the same way
         image_data = np.asarray(image_data)
         if image_data.ndim == 3:
@@ -43,7 +47,8 @@ def run_everything(single_ens):
 
         scaled_image_data = []
         scaled_target_data = []
-        for data in image_data:
+        dists = np.linspace(0, 4, 1000)
+        for count, data in enumerate(image_data):
             # normalize
             rgb = np.asarray(data)/255
 
@@ -58,19 +63,51 @@ def run_everything(single_ens):
                 interpolation=cv2.INTER_CUBIC)
 
             # visualize scaling for debugging
-            if show_resized_image:
+            if show_resized_image and count%100 == 0:
                 plt.Figure()
                 a = plt.subplot(121)
-                a.set_title('Original')
+                a.set_title('Original %.2f m' % dists[count])
                 a.imshow(data, origin='lower')
                 b = plt.subplot(122)
                 b.set_title('Scaled')
                 b.imshow(rgb, origin='lower')
                 plt.show()
 
-            # use unflattened image so we maintain the resolution information
-            angle, index = get_angle(rgb)
+            # scan the image for red pixels to determine target angle
+            if local_error is None:
+                print('NO LOCAL ERROR RECEIVED, GETTING TARGET FROM IMAGE')
+                # use unflattened image so we maintain the resolution information
+                angle, index = get_angle(rgb)
+            else:
+                angle = math.atan2(local_error[count][1], local_error[count][0])
+
             scaled_target_data.append(angle)
+
+            # if debug is on, show plots of the scaled image, predicted target
+            # location, and target angle output
+            if debug and count%100 == 0:
+                plt.figure()
+                plt.subplot(311)
+                # scaled image
+                plt.title('estimated: shifted to center at zero for viewing')
+                shift_lim = 16
+                plt.imshow(
+                    np.hstack(
+                        (rgb[:, -shift_lim:, :], rgb[:, :-shift_lim, :]))
+                    , origin='lower')
+                if local_error is None:
+                    plt.title('estimated: %i' % (index*res[1]))
+                    plt.subplot(312)
+                    # estimated location of target
+                    a = np.zeros((res[0], res[1], 3))
+                    a[:, int(index*res[1])] = [1,0,0]
+                    plt.imshow(a, origin='lower')
+                plt.subplot(313)
+                plt.xlim(-3.14, 3.14)
+                # estimated target angle
+                plt.scatter(angle, 1, c='r')
+                #plt.savefig('gif_cache/%04d'%ii)
+                plt.show()
 
             # flatten to 1D
             #NOTE should use np.ravel to maintain image order
@@ -79,25 +116,6 @@ def run_everything(single_ens):
             # scale image from -1 to 1 and save to list
             scaled_image_data.append(rgb*2 - 1)
 
-            # if debug is on, show plots of the scaled image, predicted target
-            # location, and target angle output
-            if debug:
-                plt.figure()
-                plt.subplot(311)
-                plt.title('estimated: %i' % (index*res[1]))
-                # scaled image
-                plt.imshow(rgb.reshape((res[0], res[1], 3)), origin='lower')
-                plt.subplot(312)
-                # estimated location of target
-                a = np.zeros((res[0], res[1], 3))
-                a[:, int(index*res[1])] = [1,0,0]
-                plt.imshow(a, origin='lower')
-                plt.subplot(313)
-                plt.xlim(-3.14, 3.14)
-                # estimated target angle
-                plt.scatter(angle, 1, c='r')
-                #plt.savefig('gif_cache/%04d'%ii)
-                plt.show()
 
         scaled_image_data = np.asarray(scaled_image_data)
         scaled_target_data = np.asarray(scaled_target_data)
@@ -122,7 +140,7 @@ def run_everything(single_ens):
         training_images, training_targets = preprocess_data(
             image_data=training_images, debug=debug,
             res=res, show_resized_image=show_resized_image, rows=rows,
-            flatten=flatten)
+            flatten=flatten, local_error=training_targets)
 
         return training_images, training_targets
 
@@ -148,7 +166,8 @@ def run_everything(single_ens):
 
 
     warnings.simplefilter("ignore")
-    db_name = 'rover_training_0003'
+    db_name = 'rover_training_0004'
+    # db_name = 'rover_dist_range_0_marked'
     save_db_name = '%s_results' % db_name
     # use keras model converted to nengo-dl
     use_keras = True
@@ -175,7 +194,7 @@ def run_everything(single_ens):
     gain = 100
     bias = 0
     # resolution to scale images to
-    res=[64, 64]
+    res=[32, 128]
     # select a subset of rows of the image to use, these will be used to index into the array
     # rows = [27, 28]
     rows = None
@@ -192,7 +211,7 @@ def run_everything(single_ens):
 
     #save_name = 'image_input-to-dense_layer_neurons-norm_input_weights_10k-gain_bias'
     # save_name = 'version_that_works_specifying_enc_30k'
-    save_name = '3conv_1dense'
+    save_name = 'target_from_local_error'
     params_file = 'saved_net_%ix%i' % (res[0], res[1])
     if use_keras:
         save_folder = 'data/%s/keras/%s/%s' % (db_name, params_file, save_name)
@@ -204,7 +223,8 @@ def run_everything(single_ens):
 
     notes = (
     '''
-    \n- bias initializer on input to neurons set to zeros
+    \n- bias on all layer
+    \n- default kernel initializers
     \n- 3 conv layers 1 dense
     '''
             )
@@ -393,8 +413,8 @@ def run_everything(single_ens):
 
         output_probe = tf.keras.layers.Dense(
             units=output_dims,
-            use_bias=False,
-            kernel_initializer=keras.initializers.Zeros()
+            #use_bias=False,
+            #kernel_initializer=keras.initializers.Zeros()
             )(flatten)
 
         model = tf.keras.Model(inputs=image_input, outputs=output_probe)
@@ -423,7 +443,7 @@ def run_everything(single_ens):
                 (n_training, n_steps, output_dims))
         }
 
-        def predict(save_folder='', save_name='prediction_results'):
+        def predict(save_folder='', save_name='prediction_results', num_pts=100):
             data = sim.predict(validation_images_dict, n_steps=n_steps, stateful=False)
             predictions = data[output_probe]
             predictions = np.asarray(predictions).squeeze()
@@ -433,8 +453,8 @@ def run_everything(single_ens):
                 overwrite=True)
 
             fig = plt.Figure()
-            plt.plot(validation_targets[-100:], label='target', color='r')
-            plt.plot(predictions[-100:], label='predictions', color='k', linestyle='--')
+            plt.plot(validation_targets[-num_pts:], label='target', color='r')
+            plt.plot(predictions[-num_pts:], label='predictions', color='k', linestyle='--')
             plt.legend()
             plt.savefig('%s/%s.png' % (save_folder, save_name))
             #plt.show()
@@ -447,7 +467,7 @@ def run_everything(single_ens):
         print('Training')
         sim.compile(
             # optimizer=tf.optimizers.SGD(1e-5),
-            optimizer=tf.optimizers.RMSprop(0.01),
+            optimizer=tf.optimizers.RMSprop(0.001),
             # # loss={output_probe_no_filter: tf.losses.mse})
             loss={output_probe: tf.losses.mse})
 
@@ -455,6 +475,7 @@ def run_everything(single_ens):
             epochs = [1, epochs]
 
         for epoch in range(epochs[0]-1, epochs[1]):
+            num_pts = 100
             print('\n\nEPOCH %i\n' % epoch)
             if load_net_params and epoch>0:
                 sim.load_params('%s/%s' % (save_folder, params_file))
@@ -470,10 +491,10 @@ def run_everything(single_ens):
                 print('saving network parameters to %s/%s' % (save_folder, params_file))
                 sim.save_params('%s/%s' % (save_folder, params_file))
 
-            predict_data = predict(save_folder=save_folder, save_name='prediction_epoch%i' % (epoch))
+            predict_data = predict(save_folder=save_folder, save_name='prediction_epoch%i' % (epoch), num_pts=num_pts)
 
         dat_results.save(
-            data={'targets': validation_targets[-100:]},
+            data={'targets': validation_targets},
             save_location=save_folder,
             overwrite=True)
         # return predict_data[neuron_probe]
