@@ -5,6 +5,7 @@ To run the demo with Nengo running on cpu:
 To run the demo with Nengo on loihi
     NXSDKHOST=loihighrd python nengo_rover.py
 """
+import math
 import glfw
 import mujoco_py
 import nengo
@@ -19,6 +20,7 @@ from nengo_loihi import decode_neurons
 from abr_control.arms.mujoco_config import MujocoConfig
 from abr_control.interfaces.mujoco import Mujoco
 from abr_analyze import DataHandler
+from rover_vision import RoverVision
 
 
 class ExitSim(Exception):
@@ -40,7 +42,81 @@ if len(sys.argv) > 1:
 print("Using %s as backend" % backend)
 
 
+def resize_images(
+        image_data, res, rows=None, show_resized_image=False, flatten=True):
+    # single image, append 1 dimension so we can loop through the same way
+    image_data = np.asarray(image_data)
+    if image_data.ndim == 3:
+        shape = image_data.shape
+        image_data = image_data.reshape((1, shape[0], shape[1], shape[2]))
+
+    # expect rgb image data
+    assert image_data.shape[3] == 3
+
+    scaled_image_data = []
+
+    for count, data in enumerate(image_data):
+        # normalize
+        rgb = np.asarray(data)/255
+
+        # select a subset of rows and update the vertical resolution
+        if rows is not None:
+            rgb = rgb[rows[0]:rows[1], :, :]
+            res[0] = rows[1]-rows[0]
+
+        # resize image resolution
+        if shape[0] != res[0] or shape[1] != res[1]:
+            print('Resolution does not match desired value, resizing...')
+            rgb = cv2.resize(
+                rgb, dsize=(res[1], res[0]),
+                interpolation=cv2.INTER_CUBIC)
+
+        # visualize scaling for debugging
+        if show_resized_image:
+            plt.Figure()
+            a = plt.subplot(121)
+            a.set_title('Original')
+            a.imshow(data, origin='lower')
+            b = plt.subplot(122)
+            b.set_title('Scaled')
+            b.imshow(rgb, origin='lower')
+            plt.show()
+
+        # flatten to 1D
+        #NOTE should use np.ravel to maintain image order
+        if flatten:
+            rgb = rgb.flatten()
+        # scale image from -1 to 1 and save to list
+        scaled_image_data.append(rgb*2 - 1)
+
+    scaled_image_data = np.asarray(scaled_image_data)
+
+    return scaled_image_data
+
+def target_angle_from_local_error(local_error):
+    # local_error = np.asarray(local_error)
+    print(local_error)
+    print(local_error.shape)
+    print(local_error.ndim)
+    # if local_error.ndim == 3:
+    #     shape = local_error.shape
+    #     local_error = local_error.reshape((1, shape[0], shape[1], shape[2]))
+    #
+    # angles = []
+    # for error in local_error:
+    #     angles.append(math.atan2(error[1], error[0]))
+    #
+    # angles = np.array(angles)
+
+    angles = math.atan2(local_error[1], local_error[0])
+
+    return angles
+
+
 def demo():
+    res = [32, 128]
+    vision = RoverVision(res=res, weights='saved_net_32x128', minibatch_size=1)
+
     rng = np.random.RandomState(9)
 
     # initialize our robot config for the jaco2
@@ -83,57 +159,68 @@ def demo():
     n_input = 3  # input to neural net is body_com y velocity and error along (x, y) plane
     n_output = n_dof  # output from neural net is torque signals for the wheels
 
-    dist_limit = [0.5, 0.6]
+    dist_limit = [0.5, 3.5]
     #angle_limit = [-0.4, 0.4]
     angle_limit = [-np.pi, np.pi]
 
-    collect_data = True
+    collect_data = False
     save_fig = False
-    # max 1000 fps
-    fps = 1000
-    n_targets = 30000
-    # 1000 steps for 1 simulated second
-    # how many frames between rendered images
-    reaching_frames = int(1000/fps)
-    # how much time to reach to target before updating target
-    # if == reaching frames we update target after every rendered image
-    reaching_length = reaching_frames
-    # reaching_length = 4000
+    track_results = True
+    target_track = []
+    prediction_track = []
+    n_targets = 1000
+    # NOTE this is used for collecting training data
+    # how many frames between saving an image
+    render_frame_rate = 2000
+    # how much time to allow for reaching to a target
+    # NOTE 1000 steps per second
+    reaching_length = render_frame_rate #4000
     sim_length = reaching_length * n_targets
     imgs = []
     # image will be 4 times img_size as this sets the resolution for one image
     # we stitch 4 cameras together to get a 360deg fov
-    img_size = [100, 100]
+    img_size = [32, 32]
 
-    dat = DataHandler(db_name='rover_training_0003')
-    test_name = 'training_0000'
-    dat.save(
-        data={
-                'fps': fps,
-                'reaching_length': reaching_length,
-                'sim_length': sim_length,
-                'img_size': img_size,
-                'dist_limit': dist_limit,
-                'angle_limit': angle_limit
-               },
-        save_location='%s/params' % test_name,
-        overwrite=True)
+    dat = DataHandler(db_name='rover_dist_range_0_marked')
+    test_name = 'validation_0000'
+    # dat.save(
+    #     data={
+    #             'render_frame_rate': render_frame_rate,
+    #             'reaching_length': reaching_length,
+    #             'sim_length': sim_length,
+    #             'img_size': img_size,
+    #             'dist_limit': dist_limit,
+    #             'angle_limit': angle_limit
+    #            },
+    #     save_location='%s/params' % test_name,
+    #     overwrite=True)
     import timeit
 
     with net:
         net.count = 0
+        net.img_count = 0
         net.imgs = []
         start = timeit.default_timer()
         def sim_func(t, u):
             if viewer.exit or net.count >= sim_length:
                 print('TIME: ', timeit.default_timer() - start)
                 glfw.destroy_window(viewer.window)
+                if track_results:
+                    plt.figure()
+                    plt.title('Vision Predictions')
+                    plt.plot(target_track, label='target', linestyle='-', color='k')
+                    plt.plot(prediction_track, label='prediction', linestyle='--', color='r')
+                    # plt.plot(training_targets[:net.img_count], label='training_target', color='g')
+                    plt.legend()
+                    plt.show()
                 raise ExitSim()
 
             # update our target
             if net.count % reaching_length == 0:
                 phi = np.random.uniform(low=angle_limit[0], high=angle_limit[1])
                 radius = np.random.uniform(low=dist_limit[0], high=dist_limit[1])
+                # phi = 0
+                # radius = np.linspace(0, 4.0, n_targets)[net.count]
                 viewer.target = [
                     np.cos(phi) * radius,
                     np.sin(phi) * radius,
@@ -147,7 +234,7 @@ def demo():
             u = [u0, u[1], u[2]]
 
             # send to mujoco, stepping the sim forward --------------------------------
-            interface.send_forces(0*np.asarray(u))
+            interface.send_forces(np.asarray(u))
 
             # change target from red to green if within 0.02m -------------------------
             error = viewer.target - robot_config.Tx('EE')
@@ -172,7 +259,7 @@ def demo():
 
             output_signal = np.hstack([body_com_vel[1], local_error[:2]])
 
-            if net.count % reaching_frames == 0 and (collect_data or save_fig):
+            if net.count % render_frame_rate == 0:
                 # get our image data
                 interface.sim.render(img_size[0], img_size[1], camera_name='vision1')
                 net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision1', depth=True))
@@ -195,6 +282,7 @@ def demo():
 
                 # save relevant data
                 if collect_data:
+                    print('Target Count: %i/%i ' % (int(net.count/render_frame_rate), n_targets))
                     save_data={
                             'rgb': imgs,
                             'depth': depths,
@@ -217,12 +305,30 @@ def demo():
                     plt.imshow(imgs, origin='lower')
                     plt.title('%i' % net.count)
                     plt.savefig('images/%04d.png'%net.count)
-                    #plt.show()
+                    plt.show()
 
                 net.imgs = []
 
+                # get target angle
+                target_angle = target_angle_from_local_error(local_error)
+                # target_angle = target_angle_from_local_error(training_errors[net.img_count])
+
+                # get predicted target from vision
+                imgs = resize_images(imgs, res=res, rows=None, show_resized_image=False, flatten=False)
+                predicted_angle = vision.predict(images=imgs, targets=target_angle, show_fig=False)
+                # predicted_angle = vision.predict(images=training_images[net.img_count], targets=target_angle, show_fig=False)
+                net.img_count += 1
+
+                if track_results:
+                    target_track.append(target_angle)
+                    prediction_track.append(predicted_angle)
+
+                print('Error: ', local_error)
+                print('Target: ', target_angle)
+                print('Predicted: ', predicted_angle)
+
+
             if net.count % 500 == 0:
-                print('Target Count: %i/%i ' % (int(net.count/reaching_frames), n_targets))
                 print('Time Since Start: ', timeit.default_timer() - start)
 
             net.count += 1
