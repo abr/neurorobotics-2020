@@ -87,7 +87,7 @@ class RoverVision():
         flatten = tf.keras.layers.Flatten()(conv3)
 
         output_probe = tf.keras.layers.Dense(
-            units=1,
+            units=2,
             )(flatten)
 
         model = tf.keras.Model(inputs=image_input, outputs=output_probe)

@@ -115,7 +115,7 @@ def target_angle_from_local_error(local_error):
 
 def demo():
     res = [32, 128]
-    vision = RoverVision(res=res, weights='saved_net_32x128', minibatch_size=1)
+    vision = RoverVision(res=res, weights='saved_net_32x128_learn_xy', minibatch_size=1)
 
     rng = np.random.RandomState(9)
 
@@ -165,13 +165,13 @@ def demo():
 
     collect_data = False
     save_fig = False
-    track_results = True
+    track_results = False
     target_track = []
     prediction_track = []
     n_targets = 1000
     # NOTE this is used for collecting training data
     # how many frames between saving an image
-    render_frame_rate = None
+    render_frame_rate = 1
     # how much time to allow for reaching to a target
     # NOTE 1000 steps per second
     reaching_length = 4000
@@ -252,15 +252,15 @@ def demo():
             body_com_vel_raw = data.cvel[model.body_name2id('base_link')][3:]
             body_com_vel = np.dot(R, body_com_vel_raw)
 
-            output_signal = np.hstack([body_com_vel[1], local_error[:2]])
-
             if render_frame_rate is not None and net.count % render_frame_rate == 0:
                 # get our image data
+                #TODO rework to work when not getting depths, changes indexing in imgs below
+                get_depth = True
                 interface.sim.render(img_size[0], img_size[1], camera_name='vision1')
-                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision1', depth=True))
-                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision2', depth=True))
-                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision3', depth=True))
-                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision4', depth=True))
+                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision1', depth=get_depth))
+                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision2', depth=get_depth))
+                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision3', depth=get_depth))
+                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision4', depth=get_depth))
 
                 # stack image data from four cameras into one image
                 imgs = (np.hstack(
@@ -269,11 +269,11 @@ def demo():
                             np.hstack((net.imgs[2][0], net.imgs[1][0])))
                        ))
 
-                depths = (np.hstack(
-                        (np.array(
-                            np.hstack((net.imgs[3][1], net.imgs[0][1]))),
-                            np.hstack((net.imgs[2][1], net.imgs[1][1])))
-                       ))
+                # depths = (np.hstack(
+                #         (np.array(
+                #             np.hstack((net.imgs[3][1], net.imgs[0][1]))),
+                #             np.hstack((net.imgs[2][1], net.imgs[1][1])))
+                #        ))
 
                 # save relevant data
                 if collect_data:
@@ -305,12 +305,12 @@ def demo():
                 net.imgs = []
 
                 # get target angle
-                target_angle = target_angle_from_local_error(local_error)
+                # target_angle = target_angle_from_local_error(local_error)
                 # target_angle = target_angle_from_local_error(training_errors[net.img_count])
 
                 # get predicted target from vision
                 imgs = resize_images(imgs, res=res, rows=None, show_resized_image=False, flatten=False)
-                predicted_angle = vision.predict(images=imgs, targets=target_angle, show_fig=False)
+                predicted_xy = vision.predict(images=imgs)
                 # predicted_angle = vision.predict(images=training_images[net.img_count], targets=target_angle, show_fig=False)
                 net.img_count += 1
 
@@ -318,15 +318,19 @@ def demo():
                     target_track.append(target_angle)
                     prediction_track.append(predicted_angle)
 
-                print('Error: ', local_error)
-                print('Target: ', target_angle)
-                print('Predicted: ', predicted_angle)
+                # print('Error: ', local_error)
+                # print('Target: ', target_angle)
+                # print('Predicted: ', predicted_angle)
 
 
             if net.count % 500 == 0:
                 print('Time Since Start: ', timeit.default_timer() - start)
 
             net.count += 1
+
+            # output_signal = np.hstack([body_com_vel[1], local_error[:2]])
+            output_signal = np.array([body_com_vel[1], predicted_xy[0], predicted_xy[1]])
+
 
             return output_signal
 
