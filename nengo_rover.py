@@ -156,7 +156,7 @@ def demo():
     net.interface.viewer.target = np.array([-0.4, 0.5, 0.4])
 
     n_dof = 3  # 2 wheels to control
-    n_input = 3  # input to neural net is body_com y velocity and error along (x, y) plane
+    n_input = 5  # input to neural net is body_com y velocity and error along (x, y) plane
     n_output = n_dof  # output from neural net is torque signals for the wheels
 
     dist_limit = [0.5, 3.5]
@@ -171,10 +171,10 @@ def demo():
     n_targets = 1000
     # NOTE this is used for collecting training data
     # how many frames between saving an image
-    render_frame_rate = 2000
+    render_frame_rate = None
     # how much time to allow for reaching to a target
     # NOTE 1000 steps per second
-    reaching_length = render_frame_rate #4000
+    reaching_length = 4000
     sim_length = reaching_length * n_targets
     imgs = []
     # image will be 4 times img_size as this sets the resolution for one image
@@ -203,9 +203,9 @@ def demo():
         start = timeit.default_timer()
         def sim_func(t, u):
             if viewer.exit or net.count >= sim_length:
-                print('TIME: ', timeit.default_timer() - start)
+                # print('TIME: ', timeit.default_timer() - start)
                 glfw.destroy_window(viewer.window)
-                if track_results:
+                if track_results and render_frame_rate is not None:
                     plt.figure()
                     plt.title('Vision Predictions')
                     plt.plot(target_track, label='target', linestyle='-', color='k')
@@ -227,11 +227,6 @@ def demo():
                     0.4]
                 interface.set_mocap_xyz("target", viewer.target)
                 # print('target location: ', viewer.target)
-
-            kp = 2
-            feedback = interface.get_feedback()
-            u0 = kp * (u[0]- feedback['q'][0]) - .8 * kp * feedback['dq'][0]
-            u = [u0, u[1], u[2]]
 
             # send to mujoco, stepping the sim forward --------------------------------
             interface.send_forces(np.asarray(u))
@@ -259,7 +254,7 @@ def demo():
 
             output_signal = np.hstack([body_com_vel[1], local_error[:2]])
 
-            if net.count % render_frame_rate == 0:
+            if render_frame_rate is not None and net.count % render_frame_rate == 0:
                 # get our image data
                 interface.sim.render(img_size[0], img_size[1], camera_name='vision1')
                 net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision1', depth=True))
@@ -332,11 +327,19 @@ def demo():
                 print('Time Since Start: ', timeit.default_timer() - start)
 
             net.count += 1
+
             return output_signal
 
         # -----------------------------------------------------------------------------
 
-        sim = nengo.Node(sim_func, size_in=n_dof, size_out=n_input)
+        sim = nengo.Node(sim_func, size_in=n_dof, size_out=3)
+        def get_feedback():
+            feedback = interface.get_feedback()
+            q = feedback['q']
+            dq = feedback['dq']
+            return np.array([q[0], dq[0]])
+
+        feedback_node = nengo.Node(get_feedback())
 
         # input_decodeneurons = decode_neurons.Preset5DecodeNeurons()
         # onchip_input = input_decodeneurons.get_ensemble(dim=n_input)
@@ -375,13 +378,18 @@ def demo():
 
         nengo.Connection(
             sim,
-            brain,
+            brain[:3],
+        )
+
+        nengo.Connection(
+            feedback_node,
+            brain[3:]
         )
 
         # hook up the brain ensemble to the Mujoco input
         def steering_function(x):
             body_com_vely = x[0]
-            error = x[1:]
+            error = x[1:3]
             dist = np.linalg.norm(error)
 
             # input to arctan2 is modified to account for (x, y) axes of rover vs
@@ -395,7 +403,17 @@ def demo():
                 wheels *= -1
             wheels -= body_com_vely
 
-            return np.array([turn_des, wheels, wheels])
+
+            # NOTE: NEED TO MAKE THIS WORK
+            kp = 2
+            kv = 0.8 * kp
+            # feedback = interface.get_feedback()
+            q = x[3]
+            dq = x[4]
+            u0 = kp * (turn_des- q) - kv * dq
+            u = np.array([u0, wheels, wheels])
+            return u
+
 
         nengo.Connection(
             brain,
