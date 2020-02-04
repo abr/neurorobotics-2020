@@ -14,7 +14,9 @@ import numpy as np
 import os
 import sys
 import time
+import timeit
 import matplotlib.pyplot as plt
+import cv2
 
 from nengo_loihi import decode_neurons
 from abr_control.arms.mujoco_config import MujocoConfig
@@ -46,9 +48,12 @@ def resize_images(
         image_data, res, rows=None, show_resized_image=False, flatten=True):
     # single image, append 1 dimension so we can loop through the same way
     image_data = np.asarray(image_data)
+    print(image_data.shape)
     if image_data.ndim == 3:
         shape = image_data.shape
         image_data = image_data.reshape((1, shape[0], shape[1], shape[2]))
+
+    shape = image_data.shape
 
     # expect rgb image data
     assert image_data.shape[3] == 3
@@ -65,8 +70,10 @@ def resize_images(
             res[0] = rows[1]-rows[0]
 
         # resize image resolution
-        if shape[0] != res[0] or shape[1] != res[1]:
+        if shape[1] != res[0] or shape[2] != res[1]:
             print('Resolution does not match desired value, resizing...')
+            print('Desired Res: ', res)
+            print('Input Res: ', [shape[1], shape[2]])
             rgb = cv2.resize(
                 rgb, dsize=(res[1], res[0]),
                 interpolation=cv2.INTER_CUBIC)
@@ -93,31 +100,50 @@ def resize_images(
 
     return scaled_image_data
 
-def target_angle_from_local_error(local_error):
-    # local_error = np.asarray(local_error)
-    print(local_error)
-    print(local_error.shape)
-    print(local_error.ndim)
-    # if local_error.ndim == 3:
-    #     shape = local_error.shape
-    #     local_error = local_error.reshape((1, shape[0], shape[1], shape[2]))
-    #
-    # angles = []
-    # for error in local_error:
-    #     angles.append(math.atan2(error[1], error[0]))
-    #
-    # angles = np.array(angles)
-
-    angles = math.atan2(local_error[1], local_error[0])
-
-    return angles
-
-
 def demo():
-    res = [32, 128]
+    rng = np.random.RandomState(9)
+    # we stack feedback from 4 cameras to get a 2pi view
+    render_size = [32, 32]
+    res = [render_size[0], render_size[1] * 4]
     vision = RoverVision(res=res, weights='saved_net_32x128_learn_xy', minibatch_size=1)
 
-    rng = np.random.RandomState(9)
+    # target generation limits
+    dist_limit = [0.5, 3.5]
+    angle_limit = [-np.pi, np.pi]
+
+    # data collection parameters
+    generate_training_data = False
+    save_rendered_fig = False
+    track_results = False
+    target_track = []
+    prediction_track = []
+    n_targets = 1000
+    # in steps (1ms/step)
+    render_frequency = 100
+    reaching_steps = 4000
+    sim_length = reaching_steps * n_targets
+    imgs = []
+
+
+    # network parameters
+    n_dof = 3  # 2 wheels to control
+    n_input = 5  # input to neural net is body_com y velocity, error along (x, y) plane, and q dq feedback
+    n_output = n_dof  # output from neural net is torque signals for the wheels
+    weights='saved_net_32x128_learn_xy'
+
+    dat = DataHandler(db_name='test')
+    test_name = 'validation_0000'
+    # dat.save(
+    #     data={
+    #             'render_frequency': render_frequency,
+    #             'reaching_steps': reaching_steps,
+    #             'sim_length': sim_length,
+    #             'render_size': render_size,
+    #             'dist_limit': dist_limit,
+    #             'angle_limit': angle_limit
+    #            },
+    #     save_location='%s/params' % test_name,
+    #     overwrite=True)
 
     # initialize our robot config for the jaco2
     dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -132,7 +158,6 @@ def demo():
     # create our Mujoco interface
     net.interface = Mujoco(robot_config, dt=0.001, visualize=True)
     net.interface.connect(camera_id=0)
-    #net.interface.connect()
     # shorthand
     interface = net.interface
     viewer = interface.viewer
@@ -155,87 +180,31 @@ def demo():
     # set up the target position
     net.interface.viewer.target = np.array([-0.4, 0.5, 0.4])
 
-    n_dof = 3  # 2 wheels to control
-    n_input = 5  # input to neural net is body_com y velocity and error along (x, y) plane
-    n_output = n_dof  # output from neural net is torque signals for the wheels
-
-    dist_limit = [0.5, 3.5]
-    #angle_limit = [-0.4, 0.4]
-    angle_limit = [-np.pi, np.pi]
-
-    collect_data = False
-    save_fig = False
-    track_results = False
-    target_track = []
-    prediction_track = []
-    n_targets = 1000
-    # NOTE this is used for collecting training data
-    # how many frames between saving an image
-    render_frame_rate = 100
-    # how much time to allow for reaching to a target
-    # NOTE 1000 steps per second
-    reaching_length = 4000
-    sim_length = reaching_length * n_targets
-    imgs = []
-    # image will be 4 times img_size as this sets the resolution for one image
-    # we stitch 4 cameras together to get a 360deg fov
-    img_size = [32, 32]
-
-    dat = DataHandler(db_name='rover_dist_range_0_marked')
-    test_name = 'validation_0000'
-    # dat.save(
-    #     data={
-    #             'render_frame_rate': render_frame_rate,
-    #             'reaching_length': reaching_length,
-    #             'sim_length': sim_length,
-    #             'img_size': img_size,
-    #             'dist_limit': dist_limit,
-    #             'angle_limit': angle_limit
-    #            },
-    #     save_location='%s/params' % test_name,
-    #     overwrite=True)
-    import timeit
-
     with net:
         net.count = 0
-        net.img_count = 0
         net.imgs = []
         net.predicted_xy = [0, 0]
         start = timeit.default_timer()
         def sim_func(t, u):
             if viewer.exit or net.count >= sim_length:
-                # print('TIME: ', timeit.default_timer() - start)
                 glfw.destroy_window(viewer.window)
-                if track_results and render_frame_rate is not None:
-                    plt.figure()
-                    plt.title('Vision Predictions')
-                    plt.plot(target_track, label='target', linestyle='-', color='k')
-                    plt.plot(prediction_track, label='prediction', linestyle='--', color='r')
-                    # plt.plot(training_targets[:net.img_count], label='training_target', color='g')
-                    plt.legend()
-                    plt.show()
-                raise ExitSim()
 
             # update our target
-            if net.count % reaching_length == 0:
+            if net.count % reaching_steps == 0:
                 phi = np.random.uniform(low=angle_limit[0], high=angle_limit[1])
                 radius = np.random.uniform(low=dist_limit[0], high=dist_limit[1])
-                # phi = 0
-                # radius = np.linspace(0, 4.0, n_targets)[net.count]
                 viewer.target = [
                     np.cos(phi) * radius,
                     np.sin(phi) * radius,
                     0.4]
                 interface.set_mocap_xyz("target", viewer.target)
-                # print('target location: ', viewer.target)
 
             # send to mujoco, stepping the sim forward --------------------------------
             interface.send_forces(np.asarray(u))
 
-            # change target from red to green if within 0.02m -------------------------
             error = viewer.target - robot_config.Tx('EE')
-            # model.geom_rgba[target_geom_id] = green if np.linalg.norm(error) < 0.02 else red
-            #
+            model.geom_rgba[target_geom_id] = green if np.linalg.norm(error) < 0.02 else red
+
             # error is in global coordinates, want it in local coordinates for rover --
             # body_xmat will take from local coordinates to global
             R_raw = np.copy(data.body_xmat[EE_id]).reshape(3, 3).T  # R.T = R^-1
@@ -247,54 +216,37 @@ def demo():
                 [0, 0, 1]
             ])
             R = np.dot(R90, R_raw)
-            local_error = np.dot(R, error)
+            target = np.dot(R, error)
+            target_track.append(target)
 
             # we also want the egocentric velocity of the rover
             body_com_vel_raw = data.cvel[model.body_name2id('base_link')][3:]
             body_com_vel = np.dot(R, body_com_vel_raw)
 
-            if render_frame_rate is not None and net.count % render_frame_rate == 0:
+            if net.count % render_frequency == 0:
                 # get our image data
-                #TODO rework to work when not getting depths, changes indexing in imgs below
-                get_depth = False
-                interface.sim.render(img_size[0], img_size[1], camera_name='vision1')
-                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision1', depth=get_depth))
-                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision2', depth=get_depth))
-                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision3', depth=get_depth))
-                net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision4', depth=get_depth))
+                interface.sim.render(render_size[0], render_size[1], camera_name='vision1')
+                #TODO rename the vision sensors so we can stack them sequentially by name
+                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision1', depth=False))
+                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision2', depth=False))
+                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision3', depth=False))
+                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision4', depth=False))
 
-                if get_depth:
-                    # stack image data from four cameras into one image
-                    imgs = (np.hstack(
-                            (np.array(
-                                np.hstack((net.imgs[3][0], net.imgs[0][0]))),
-                                np.hstack((net.imgs[2][0], net.imgs[1][0])))
-                        ))
-
-                    # depths = (np.hstack(
-                    #         (np.array(
-                    #             np.hstack((net.imgs[3][1], net.imgs[0][1]))),
-                    #             np.hstack((net.imgs[2][1], net.imgs[1][1])))
-                    #        ))
-                else:
-                    imgs = (np.hstack(
-                            (np.array(
-                                np.hstack((net.imgs[3], net.imgs[0]))),
-                                np.hstack((net.imgs[2], net.imgs[1])))
-                        ))
+                imgs = (np.hstack(
+                        (np.array(
+                            np.hstack((net.imgs[3], net.imgs[0]))),
+                            np.hstack((net.imgs[2], net.imgs[1])))
+                    ))
 
                 # save relevant data
-                if collect_data:
-                    print('Target Count: %i/%i ' % (int(net.count/render_frame_rate), n_targets))
+                if generate_training_data:
+                    print('Target Count: %i/%i ' % (int(net.count/render_frequency), n_targets))
                     save_data={
                             'rgb': imgs,
-                            'depth': depths,
                             'target': viewer.target,
                             'EE': robot_config.Tx('EE'),
                             'EE_xmat': R_raw,
-                            'local_error': local_error,
-                            # 'cvel': body_com_vel_raw,
-                            # 'steering_output': u
+                            'target': target,
                         }
 
                     dat.save(
@@ -303,7 +255,7 @@ def demo():
                         overwrite=True)
 
                 # save figure
-                if save_fig:
+                if save_rendered_fig:
                     plt.Figure()
                     plt.imshow(imgs, origin='lower')
                     plt.title('%i' % net.count)
@@ -312,23 +264,13 @@ def demo():
 
                 net.imgs = []
 
-                # get target angle
-                # target_angle = target_angle_from_local_error(local_error)
-                # target_angle = target_angle_from_local_error(training_errors[net.img_count])
-
                 # get predicted target from vision
                 imgs = resize_images(imgs, res=res, rows=None, show_resized_image=False, flatten=False)
                 net.predicted_xy = vision.predict(images=imgs)
-                # predicted_angle = vision.predict(images=training_images[net.img_count], targets=target_angle, show_fig=False)
-                net.img_count += 1
 
                 if track_results:
                     target_track.append(target_angle)
                     prediction_track.append(predicted_angle)
-
-                # print('Error: ', local_error)
-                # print('Target: ', target_angle)
-                # print('Predicted: ', predicted_angle)
 
 
             if net.count % 500 == 0:
@@ -336,39 +278,19 @@ def demo():
 
             net.count += 1
 
-            # output_signal = np.hstack([body_com_vel[1], local_error[:2]])
             output_signal = np.array([body_com_vel[1], net.predicted_xy[0], net.predicted_xy[1]])
-
 
             return output_signal
 
-        # -----------------------------------------------------------------------------
-
-        sim = nengo.Node(sim_func, size_in=n_dof, size_out=3)
         def get_feedback():
             feedback = interface.get_feedback()
             q = feedback['q']
             dq = feedback['dq']
             return np.array([q[0], dq[0]])
 
+        # -----------------------------------------------------------------------------
+        sim = nengo.Node(sim_func, size_in=n_dof, size_out=3)
         feedback_node = nengo.Node(get_feedback())
-
-        # input_decodeneurons = decode_neurons.Preset5DecodeNeurons()
-        # onchip_input = input_decodeneurons.get_ensemble(dim=n_input)
-        # nengo.Connection(sim[:n_input], onchip_input, synapse=None)
-        # inp2ens_transform = np.hstack(
-        #     [np.eye(n_input), -(np.eye(n_input))] * input_decodeneurons.pairs_per_dim
-        # )
-        #
-        # output_decodeneurons = decode_neurons.Preset5DecodeNeurons()
-        # onchip_output = output_decodeneurons.get_ensemble(dim=n_output)
-        # out2sim_transform = (
-        #     np.hstack(
-        #         [np.eye(n_output), -(np.eye(n_output))]
-        #         * output_decodeneurons.pairs_per_dim
-        #     ) / 2000.0
-        # )  # divide by 100 (neuron firing rate) * 20 (on/off neurons per dim)
-        # nengo.Connection(onchip_output.neurons, sim, transform=out2sim_transform)
 
         n_neurons = 1000
         encoders = nengo.dists.UniformHypersphere(surface=True).sample(n_neurons, d=n_input)
@@ -379,14 +301,6 @@ def demo():
             radius=np.sqrt(n_input),
             encoders=encoders,
         )
-
-        # # hook up Mujoco output signal to brain ensemble
-        # inp2ens_transform = np.dot(encoders, inp2ens_transform)
-        # nengo.Connection(
-        #     onchip_input.neurons,
-        #     brain.neurons,
-        #     transform=inp2ens_transform,
-        # )
 
         nengo.Connection(
             sim,
@@ -415,15 +329,8 @@ def demo():
                 wheels *= -1
             wheels -= body_com_vely
 
-
-            # NOTE: NEED TO MAKE THIS WORK
-            # 3.5m is max dist for target, want slower turning when target is far away
-            # gain_scale = (1/(dist/3.5))
-            # kp = 0.5 * gain_scale
-            # kv = 0.8 * kp
             kp = 1
             kv = 0.8
-            # feedback = interface.get_feedback()
             q = x[3]
             dq = x[4]
             u0 = kp * (turn_des- q) - kv * dq
