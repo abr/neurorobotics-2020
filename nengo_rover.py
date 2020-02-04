@@ -6,6 +6,9 @@ To run the demo with Nengo on loihi
     NXSDKHOST=loihighrd python nengo_rover.py
 """
 import math
+import tensorflow as tf
+import keras
+import nengo_dl
 import glfw
 import mujoco_py
 import nengo
@@ -22,7 +25,6 @@ from nengo_loihi import decode_neurons
 from abr_control.arms.mujoco_config import MujocoConfig
 from abr_control.interfaces.mujoco import Mujoco
 from abr_analyze import DataHandler
-from rover_vision import RoverVision
 
 
 class ExitSim(Exception):
@@ -48,7 +50,6 @@ def resize_images(
         image_data, res, rows=None, show_resized_image=False, flatten=True):
     # single image, append 1 dimension so we can loop through the same way
     image_data = np.asarray(image_data)
-    print(image_data.shape)
     if image_data.ndim == 3:
         shape = image_data.shape
         image_data = image_data.reshape((1, shape[0], shape[1], shape[2]))
@@ -101,12 +102,8 @@ def resize_images(
     return scaled_image_data
 
 def demo():
-    rng = np.random.RandomState(9)
-    # we stack feedback from 4 cameras to get a 2pi view
-    render_size = [32, 32]
-    res = [render_size[0], render_size[1] * 4]
-    vision = RoverVision(res=res, weights='saved_net_32x128_learn_xy', minibatch_size=1)
-
+    seed = 9
+    rng = np.random.RandomState(seed)
     # target generation limits
     dist_limit = [0.5, 3.5]
     angle_limit = [-np.pi, np.pi]
@@ -130,6 +127,15 @@ def demo():
     n_input = 5  # input to neural net is body_com y velocity, error along (x, y) plane, and q dq feedback
     n_output = n_dof  # output from neural net is torque signals for the wheels
     weights='saved_net_32x128_learn_xy'
+    # we stack feedback from 4 cameras to get a 2pi view
+    render_size = [32, 32]
+    res = [render_size[0], render_size[1] * 4]
+    subpixels = res[0] * res[1] * 3
+    # we are passing in one image at a time
+    minibatch_size = 1
+    filters = [32, 64, 128]
+    kernel_size = [3, 3, 3]
+    strides = [1, 1, 1]
 
     dat = DataHandler(db_name='test')
     test_name = 'validation_0000'
@@ -153,8 +159,62 @@ def demo():
         use_sim_state=True
     )
 
-    # create the Nengo network
-    net = nengo.Network(seed=0)
+    # set up our vision portion of the network in keras and convert to nengo_dl before adding other sections
+    image_input = tf.keras.Input(shape=(res[0], res[1], 3), batch_size=minibatch_size)
+
+    conv1 = tf.keras.layers.Conv2D(
+        filters=filters[0],
+        kernel_size=kernel_size[0],
+        strides=strides[0],
+        use_bias=True,
+        activation=tf.nn.relu,
+        data_format="channels_last",
+        )
+
+    conv1_out = conv1(image_input)
+
+    conv2 = tf.keras.layers.Conv2D(
+        filters=filters[1],
+        kernel_size=kernel_size[1],
+        strides=strides[1],
+        use_bias=True,
+        activation=tf.nn.relu,
+        data_format="channels_last",
+        )(conv1_out)
+
+    conv3 = tf.keras.layers.Conv2D(
+        filters=filters[2],
+        kernel_size=kernel_size[2],
+        strides=strides[2],
+        use_bias=True,
+        activation=tf.nn.relu,
+        data_format="channels_last",
+        )(conv2)
+
+    flatten = tf.keras.layers.Flatten()(conv3)
+
+    vis_output_probe = tf.keras.layers.Dense(
+        units=2,
+        )
+
+    vis_output = vis_output_probe(flatten)
+
+    model = tf.keras.Model(inputs=image_input, outputs=vis_output)
+
+    converter = nengo_dl.Converter(model)
+    net = converter.net
+    # get our vision connections from the nengo_dl converter
+    vision_input = converter.inputs[image_input]
+    # vision_input = converter.layer_map[conv1][0][0]
+    vision_output = converter.layer_map[vis_output_probe][0][0]
+    # vision_output = converter.outputs[vis_output_probe]
+
+
+    if weights is not None:
+        with nengo_dl.Simulator(net, minibatch_size=minibatch_size, seed=seed) as sim:
+            sim.load_params(weights)
+            sim.freeze_params(net)
+
     # create our Mujoco interface
     net.interface = Mujoco(robot_config, dt=0.001, visualize=True)
     net.interface.connect(camera_id=0)
@@ -181,11 +241,12 @@ def demo():
     net.interface.viewer.target = np.array([-0.4, 0.5, 0.4])
 
     with net:
-        net.count = 0
+        net.count = -1
         net.imgs = []
         net.predicted_xy = [0, 0]
         start = timeit.default_timer()
         def sim_func(t, u):
+            net.count += 1
             if viewer.exit or net.count >= sim_length:
                 glfw.destroy_window(viewer.window)
 
@@ -202,8 +263,75 @@ def demo():
             # send to mujoco, stepping the sim forward --------------------------------
             interface.send_forces(np.asarray(u))
 
+            if net.count % 500 == 0:
+                print('Time Since Start: ', timeit.default_timer() - start)
+
+
+        def render_vision_input(t):
+            # get our image data
+            if net.count % render_frequency == 0:
+                net.imgs = []
+                interface.sim.render(render_size[0], render_size[1], camera_name='vision1')
+                #TODO rename the vision sensors so we can stack them sequentially by name
+                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision1', depth=False))
+                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision2', depth=False))
+                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision3', depth=False))
+                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision4', depth=False))
+
+                net.imgs = (np.hstack(
+                        (np.array(
+                            np.hstack((net.imgs[3], net.imgs[0]))),
+                            np.hstack((net.imgs[2], net.imgs[1])))
+                    ))
+
+                # save relevant data
+                if generate_training_data:
+                    #TODO update where we save data as this may be broken from moving the local error calc to node
+                    print('Target Count: %i/%i ' % (int(net.count/render_frequency), n_targets))
+                    raise NotImplementedError
+                    save_data={
+                            'rgb': net.imgs,
+                            'target': viewer.target,
+                            'EE': robot_config.Tx('EE'),
+                            'EE_xmat': R_raw,
+                            'target': target,
+                        }
+
+                    dat.save(
+                        data=save_data,
+                        save_location='%s/data/%04d' % (test_name, net.count),
+                        overwrite=True)
+
+                # save figure
+                if save_rendered_fig:
+                    plt.Figure()
+                    plt.imshow(net.imgs, origin='lower')
+                    plt.title('%i' % net.count)
+                    plt.savefig('images/%04d.png'%net.count)
+                    plt.show()
+
+
+                # get predicted target from vision
+                net.imgs = resize_images(net.imgs, res=res, rows=None, show_resized_image=False, flatten=True).squeeze()
+
+                if track_results:
+                    #TODO add result tracking back
+                    raise NotImplementedError
+                    target_track.append(target_angle)
+                    prediction_track.append(predicted_angle)
+
+                # net.imgs = {
+                #     vision_input: net.imgs.reshape(
+                #         (1, 1, subpixels))
+                # }
+
+            return net.imgs
+
+
+        def get_feedback(t):
+
             error = viewer.target - robot_config.Tx('EE')
-            model.geom_rgba[target_geom_id] = green if np.linalg.norm(error) < 0.02 else red
+            # model.geom_rgba[target_geom_id] = green if np.linalg.norm(error) < 0.02 else red
 
             # error is in global coordinates, want it in local coordinates for rover --
             # body_xmat will take from local coordinates to global
@@ -223,99 +351,18 @@ def demo():
             body_com_vel_raw = data.cvel[model.body_name2id('base_link')][3:]
             body_com_vel = np.dot(R, body_com_vel_raw)
 
-            if net.count % render_frequency == 0:
-                # get our image data
-                interface.sim.render(render_size[0], render_size[1], camera_name='vision1')
-                #TODO rename the vision sensors so we can stack them sequentially by name
-                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision1', depth=False))
-                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision2', depth=False))
-                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision3', depth=False))
-                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision4', depth=False))
-
-                imgs = (np.hstack(
-                        (np.array(
-                            np.hstack((net.imgs[3], net.imgs[0]))),
-                            np.hstack((net.imgs[2], net.imgs[1])))
-                    ))
-
-                # save relevant data
-                if generate_training_data:
-                    print('Target Count: %i/%i ' % (int(net.count/render_frequency), n_targets))
-                    save_data={
-                            'rgb': imgs,
-                            'target': viewer.target,
-                            'EE': robot_config.Tx('EE'),
-                            'EE_xmat': R_raw,
-                            'target': target,
-                        }
-
-                    dat.save(
-                        data=save_data,
-                        save_location='%s/data/%04d' % (test_name, net.count),
-                        overwrite=True)
-
-                # save figure
-                if save_rendered_fig:
-                    plt.Figure()
-                    plt.imshow(imgs, origin='lower')
-                    plt.title('%i' % net.count)
-                    plt.savefig('images/%04d.png'%net.count)
-                    plt.show()
-
-                net.imgs = []
-
-                # get predicted target from vision
-                imgs = resize_images(imgs, res=res, rows=None, show_resized_image=False, flatten=False)
-                net.predicted_xy = vision.predict(images=imgs)
-
-                if track_results:
-                    target_track.append(target_angle)
-                    prediction_track.append(predicted_angle)
-
-
-            if net.count % 500 == 0:
-                print('Time Since Start: ', timeit.default_timer() - start)
-
-            net.count += 1
-
-            output_signal = np.array([body_com_vel[1], net.predicted_xy[0], net.predicted_xy[1]])
-
-            return output_signal
-
-        def get_feedback():
             feedback = interface.get_feedback()
             q = feedback['q']
             dq = feedback['dq']
-            return np.array([q[0], dq[0]])
+            return np.array([body_com_vel[1], q[0], dq[0]])
 
-        # -----------------------------------------------------------------------------
-        sim = nengo.Node(sim_func, size_in=n_dof, size_out=3)
-        feedback_node = nengo.Node(get_feedback())
 
-        n_neurons = 1000
-        encoders = nengo.dists.UniformHypersphere(surface=True).sample(n_neurons, d=n_input)
-        brain = nengo.Ensemble(
-            # neuron_type=nengo.Direct(),
-            n_neurons=n_neurons,
-            dimensions=n_input,
-            radius=np.sqrt(n_input),
-            encoders=encoders,
-        )
-
-        nengo.Connection(
-            sim,
-            brain[:3],
-        )
-
-        nengo.Connection(
-            feedback_node,
-            brain[3:]
-        )
-
-        # hook up the brain ensemble to the Mujoco input
         def steering_function(x):
             body_com_vely = x[0]
-            error = x[1:3]
+            q = x[1]
+            dq = x[2]
+            error = x[3:]
+
             dist = np.linalg.norm(error)
 
             # input to arctan2 is modified to account for (x, y) axes of rover vs
@@ -331,15 +378,44 @@ def demo():
 
             kp = 1
             kv = 0.8
-            q = x[3]
-            dq = x[4]
             u0 = kp * (turn_des- q) - kv * dq
-            u = np.array([u0, wheels, wheels])
-            return u
 
+            return np.array([u0, wheels, wheels])
+
+        # -----------------------------------------------------------------------------
+        sim = nengo.Node(sim_func, size_in=n_dof) #, size_out=3)
+
+        feedback_node = nengo.Node(get_feedback)
+
+        render_node = nengo.Node(render_vision_input, size_out=subpixels)
+
+        n_motor_neurons = 1000
+        encoders = nengo.dists.UniformHypersphere(surface=True).sample(n_motor_neurons, d=n_input)
+        motor_control = nengo.Ensemble(
+            # neuron_type=nengo.Direct(),
+            n_neurons=n_motor_neurons,
+            dimensions=n_input,
+            radius=np.sqrt(n_input),
+            encoders=encoders,
+        )
 
         nengo.Connection(
-            brain,
+            render_node,
+            vision_input
+        )
+
+        nengo.Connection(
+            vision_output,
+            motor_control[3:],
+        )
+
+        nengo.Connection(
+            feedback_node,
+            motor_control[:3]
+        )
+
+        nengo.Connection(
+            motor_control,
             # onchip_output,
             sim,
             function=steering_function,
