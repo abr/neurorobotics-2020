@@ -171,7 +171,7 @@ def demo():
     n_targets = 1000
     # NOTE this is used for collecting training data
     # how many frames between saving an image
-    render_frame_rate = 1
+    render_frame_rate = 100
     # how much time to allow for reaching to a target
     # NOTE 1000 steps per second
     reaching_length = 4000
@@ -200,6 +200,7 @@ def demo():
         net.count = 0
         net.img_count = 0
         net.imgs = []
+        net.predicted_xy = [0, 0]
         start = timeit.default_timer()
         def sim_func(t, u):
             if viewer.exit or net.count >= sim_length:
@@ -255,25 +256,32 @@ def demo():
             if render_frame_rate is not None and net.count % render_frame_rate == 0:
                 # get our image data
                 #TODO rework to work when not getting depths, changes indexing in imgs below
-                get_depth = True
+                get_depth = False
                 interface.sim.render(img_size[0], img_size[1], camera_name='vision1')
                 net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision1', depth=get_depth))
                 net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision2', depth=get_depth))
                 net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision3', depth=get_depth))
                 net.imgs.append(interface.sim.render(img_size[0], img_size[1], camera_name='vision4', depth=get_depth))
 
-                # stack image data from four cameras into one image
-                imgs = (np.hstack(
-                        (np.array(
-                            np.hstack((net.imgs[3][0], net.imgs[0][0]))),
-                            np.hstack((net.imgs[2][0], net.imgs[1][0])))
-                       ))
+                if get_depth:
+                    # stack image data from four cameras into one image
+                    imgs = (np.hstack(
+                            (np.array(
+                                np.hstack((net.imgs[3][0], net.imgs[0][0]))),
+                                np.hstack((net.imgs[2][0], net.imgs[1][0])))
+                        ))
 
-                # depths = (np.hstack(
-                #         (np.array(
-                #             np.hstack((net.imgs[3][1], net.imgs[0][1]))),
-                #             np.hstack((net.imgs[2][1], net.imgs[1][1])))
-                #        ))
+                    # depths = (np.hstack(
+                    #         (np.array(
+                    #             np.hstack((net.imgs[3][1], net.imgs[0][1]))),
+                    #             np.hstack((net.imgs[2][1], net.imgs[1][1])))
+                    #        ))
+                else:
+                    imgs = (np.hstack(
+                            (np.array(
+                                np.hstack((net.imgs[3], net.imgs[0]))),
+                                np.hstack((net.imgs[2], net.imgs[1])))
+                        ))
 
                 # save relevant data
                 if collect_data:
@@ -310,7 +318,7 @@ def demo():
 
                 # get predicted target from vision
                 imgs = resize_images(imgs, res=res, rows=None, show_resized_image=False, flatten=False)
-                predicted_xy = vision.predict(images=imgs)
+                net.predicted_xy = vision.predict(images=imgs)
                 # predicted_angle = vision.predict(images=training_images[net.img_count], targets=target_angle, show_fig=False)
                 net.img_count += 1
 
@@ -329,7 +337,7 @@ def demo():
             net.count += 1
 
             # output_signal = np.hstack([body_com_vel[1], local_error[:2]])
-            output_signal = np.array([body_com_vel[1], predicted_xy[0], predicted_xy[1]])
+            output_signal = np.array([body_com_vel[1], net.predicted_xy[0], net.predicted_xy[1]])
 
 
             return output_signal
@@ -409,8 +417,12 @@ def demo():
 
 
             # NOTE: NEED TO MAKE THIS WORK
-            kp = 2
-            kv = 0.8 * kp
+            # 3.5m is max dist for target, want slower turning when target is far away
+            # gain_scale = (1/(dist/3.5))
+            # kp = 0.5 * gain_scale
+            # kv = 0.8 * kp
+            kp = 1
+            kv = 0.8
             # feedback = interface.get_feedback()
             q = x[3]
             dq = x[4]
