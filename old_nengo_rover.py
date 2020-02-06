@@ -133,7 +133,7 @@ def demo():
     weights='saved_net_32x128_learn_xy'
 
     dat = DataHandler(db_name='rover_vis_comparison')
-    test_name = 'split_net_0002'
+    test_name = 'split_net_0004'
     # dat.save(
     #     data={
     #             'render_frequency': render_frequency,
@@ -155,7 +155,7 @@ def demo():
     )
 
     # create the Nengo network
-    net = nengo.Network(seed=0)
+    net = nengo.Network(seed=seed)
     # create our Mujoco interface
     net.interface = Mujoco(robot_config, dt=0.001, visualize=True)
     net.interface.connect(camera_id=0)
@@ -187,9 +187,13 @@ def demo():
         net.imgs = []
         net.predicted_xy = [0, 0]
         start = timeit.default_timer()
-        def sim_func(t, u):
+        def sim_func(t, x):
             net.count += 1
+            local_target = x[3:5]
+            prediction = x[5:]
+            u = x[:3]
 
+            print('pre exit count: ', net.count)
             if viewer.exit or net.count == sim_length:
                 if track_results:
                     dat.save(
@@ -202,6 +206,7 @@ def demo():
                     )
 
                 glfw.destroy_window(viewer.window)
+                raise ExitSim
 
             # update our target
             if net.count % reaching_steps == 0:
@@ -223,26 +228,14 @@ def demo():
             # send to mujoco, stepping the sim forward --------------------------------
             interface.send_forces(0*np.asarray(u))
 
-            error = viewer.target - robot_config.Tx('EE')
-            model.geom_rgba[target_geom_id] = green if np.linalg.norm(error) < 0.02 else red
+            if track_results:
+                print('track count: ', net.count)
+                prediction_track.append(prediction)
+                motor_track.append(u)
+                target_track.append(local_target)
 
-            # error is in global coordinates, want it in local coordinates for rover --
-            # body_xmat will take from local coordinates to global
-            R_raw = np.copy(data.body_xmat[EE_id]).reshape(3, 3).T  # R.T = R^-1
-            # rotate it so the steering wheels point forward along y
-            theta = 3 * np.pi / 2
-            R90 = np.array([
-                [np.cos(theta), -np.sin(theta), 0],
-                [np.sin(theta), np.cos(theta), 0],
-                [0, 0, 1]
-            ])
-            R = np.dot(R90, R_raw)
-            target = np.dot(R, error)
 
-            # we also want the egocentric velocity of the rover
-            body_com_vel_raw = data.cvel[model.body_name2id('base_link')][3:]
-            body_com_vel = np.dot(R, body_com_vel_raw)
-
+        def render_and_predict(t):
             if net.count % render_frequency == 0:
                 # get our image data
                 interface.sim.render(render_size[0], render_size[1], camera_name='vision1')
@@ -288,53 +281,63 @@ def demo():
                 imgs = resize_images(imgs, res=res, rows=None, show_resized_image=False, flatten=False)
                 net.predicted_xy = vision.predict(images=imgs)
 
-                if track_results:
-                    target_track.append(target[:2])
-                    prediction_track.append(net.predicted_xy)
-                    motor_track.append(u)
-
-
             if net.count % 500 == 0:
                 print('Time Since Start: ', timeit.default_timer() - start)
 
-            output_signal = np.array([body_com_vel[1], net.predicted_xy[0], net.predicted_xy[1]])
+            # output_signal = np.array([body_com_vel[1], net.predicted_xy[0], net.predicted_xy[1]])
+            output_signal = np.array([net.predicted_xy[0], net.predicted_xy[1]])
 
             return output_signal
 
-        def get_feedback():
+
+        def get_feedback(t):
+
+            error = viewer.target - robot_config.Tx('EE')
+            # model.geom_rgba[target_geom_id] = green if np.linalg.norm(error) < 0.02 else red
+
+            # error is in global coordinates, want it in local coordinates for rover --
+            # body_xmat will take from local coordinates to global
+            R_raw = np.copy(data.body_xmat[EE_id]).reshape(3, 3).T  # R.T = R^-1
+            # rotate it so the steering wheels point forward along y
+            theta = 3 * np.pi / 2
+            R90 = np.array([
+                [np.cos(theta), -np.sin(theta), 0],
+                [np.sin(theta), np.cos(theta), 0],
+                [0, 0, 1]
+            ])
+            R = np.dot(R90, R_raw)
+            local_target = np.dot(R, error)
+
+            print('-------------')
+            print('calc target')
+            print(net.count)
+            print(viewer.target)
+            print(robot_config.Tx)
+            # we also want the egocentric velocity of the rover
+            body_com_vel_raw = data.cvel[model.body_name2id('base_link')][3:]
+            body_com_vel = np.dot(R, body_com_vel_raw)
+
             feedback = interface.get_feedback()
             q = feedback['q']
             dq = feedback['dq']
-            return np.array([q[0], dq[0]])
 
-        # -----------------------------------------------------------------------------
-        sim = nengo.Node(sim_func, size_in=n_dof, size_out=3)
-        feedback_node = nengo.Node(get_feedback())
+            # if track_results and net.count%render_frequency == 0 and net.count >= 0:
+            #     # print('target net count: ', net.count)
+            #     # print(render_frequency)
+            #     print('NET COUNT: ', net.count)
+            #     target_track.append(target[:2])
+            #     # print('target: ', np.asarray(target_track).shape)
 
-        n_neurons = 1000
-        encoders = nengo.dists.UniformHypersphere(surface=True).sample(n_neurons, d=n_input)
-        brain = nengo.Ensemble(
-            # neuron_type=nengo.Direct(),
-            n_neurons=n_neurons,
-            dimensions=n_input,
-            radius=np.sqrt(n_input),
-            encoders=encoders,
-        )
+            return np.array([body_com_vel[1], q[0], dq[0], local_target[0], local_target[1]])
 
-        nengo.Connection(
-            sim,
-            brain[:3],
-        )
-
-        nengo.Connection(
-            feedback_node,
-            brain[3:]
-        )
 
         # hook up the brain ensemble to the Mujoco input
         def steering_function(x):
             body_com_vely = x[0]
-            error = x[1:3]
+            q = x[1]
+            dq = x[2]
+            error = x[3:]
+
             dist = np.linalg.norm(error)
 
             # input to arctan2 is modified to account for (x, y) axes of rover vs
@@ -350,18 +353,57 @@ def demo():
 
             kp = 1
             kv = 0.8
-            q = x[3]
-            dq = x[4]
+            # q = x[3]
+            # dq = x[4]
             u0 = kp * (turn_des- q) - kv * dq
             u = np.array([u0, wheels, wheels])
             return u
 
+        # -----------------------------------------------------------------------------
+        # sim func passing vision output now
+        sim = nengo.Node(sim_func, size_in=7, size_out=None)
+        feedback_node = nengo.Node(get_feedback, size_in=None, size_out=5)
+        vision_node = nengo.Node(render_and_predict, size_in=None, size_out=2)
+
+        n_neurons = 1000
+        encoders = nengo.dists.UniformHypersphere(surface=True).sample(n_neurons, d=n_input)
+        brain = nengo.Ensemble(
+            # neuron_type=nengo.Direct(),
+            n_neurons=n_neurons,
+            dimensions=n_input,
+            radius=np.sqrt(n_input),
+            encoders=encoders,
+            seed=seed
+        )
+
+        nengo.Connection(
+            vision_node,
+            brain[3:],
+        )
+
+        nengo.Connection(
+            feedback_node[:3],
+            brain[:3],
+            synapse=None
+        )
+
+        nengo.Connection(
+            feedback_node[3:],
+            sim[3:5],
+            synapse=None
+        )
 
         nengo.Connection(
             brain,
             # onchip_output,
-            sim,
+            sim[:3],
             function=steering_function,
+        )
+
+        nengo.Connection(
+            vision_node,
+            sim[5:],
+            synapse=None
         )
 
     return net, robot_config

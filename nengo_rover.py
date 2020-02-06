@@ -139,7 +139,7 @@ def demo():
     strides = [1, 1, 1]
 
     dat = DataHandler(db_name='rover_vis_comparison')
-    test_name = 'combined_net_0003'
+    test_name = 'combined_net_0004'
     # dat.save(
     #     data={
     #             'render_frequency': render_frequency,
@@ -250,17 +250,12 @@ def demo():
         def sim_func(t, x):
             net.count += 1
             u = x[:3]
-            prediction = x[3:]
+            prediction = x[3:5]
+            local_target = x[5:]
 
-
-            if track_results and net.count % render_frequency == 0:
-                motor_track.append(u)
-                prediction_track.append(prediction)
-                # print('motor: ', np.asarray(motor_track).shape)
-                # print('pred: ', np.asarray(prediction_track).shape)
 
             # print("MAIN SIM COUNT: ", net.count)
-            if viewer.exit or net.count >= sim_length:
+            if viewer.exit or net.count == sim_length:
                 if track_results:
                     dat.save(
                         data={'target': target_track,
@@ -271,6 +266,7 @@ def demo():
                         overwrite=True
                     )
                 glfw.destroy_window(viewer.window)
+                raise ExitSim
 
             # update our target
             if net.count % reaching_steps == 0:
@@ -290,10 +286,16 @@ def demo():
                 interface.set_mocap_xyz("target", viewer.target)
 
             # send to mujoco, stepping the sim forward --------------------------------
-            interface.send_forces(np.asarray(u))
+            interface.send_forces(0*np.asarray(u))
 
             if net.count % 500 == 0:
                 print('Time Since Start: ', timeit.default_timer() - start)
+
+            if track_results and net.count % render_frequency == 0:
+                print('NET COUNT: ', net.count)
+                motor_track.append(u)
+                prediction_track.append(prediction)
+                target_track.append(local_target)
 
 
 
@@ -368,7 +370,12 @@ def demo():
                 [0, 0, 1]
             ])
             R = np.dot(R90, R_raw)
-            target = np.dot(R, error)
+            local_target = np.dot(R, error)
+            print('-------------')
+            print('calc target')
+            print(net.count)
+            print(viewer.target)
+            print(robot_config.Tx)
 
             # we also want the egocentric velocity of the rover
             body_com_vel_raw = data.cvel[model.body_name2id('base_link')][3:]
@@ -378,13 +385,7 @@ def demo():
             q = feedback['q']
             dq = feedback['dq']
 
-            if track_results and net.count%render_frequency == 0:
-                # print('target net count: ', net.count)
-                # print(render_frequency)
-                target_track.append(target[:2])
-                # print('target: ', np.asarray(target_track).shape)
-
-            return np.array([body_com_vel[1], q[0], dq[0]])
+            return np.array([body_com_vel[1], q[0], dq[0], local_target[0], local_target[1]])
 
 
         def steering_function(x):
@@ -414,11 +415,11 @@ def demo():
 
 
         # -----------------------------------------------------------------------------
-        sim = nengo.Node(sim_func, size_in=5) #, size_out=3)
+        sim = nengo.Node(sim_func, size_in=7, size_out=None)
 
-        feedback_node = nengo.Node(get_feedback, size_out=n_dof)
+        feedback_node = nengo.Node(get_feedback, size_in=None, size_out=5)
 
-        render_node = nengo.Node(render_vision_input, size_out=subpixels)
+        render_node = nengo.Node(render_vision_input, size_in=None, size_out=subpixels)
 
         n_motor_neurons = 1000
         encoders = nengo.dists.UniformHypersphere(surface=True).sample(n_motor_neurons, d=n_input)
@@ -428,11 +429,18 @@ def demo():
             dimensions=n_input,
             radius=np.sqrt(n_input),
             encoders=encoders,
+            seed=seed
         )
 
         nengo.Connection(
             vision_output,
-            sim[3:],
+            sim[3:5],
+            synapse=None
+        )
+
+        nengo.Connection(
+            feedback_node[3:],
+            sim[5:],
             synapse=None
         )
 
@@ -448,7 +456,7 @@ def demo():
         )
 
         nengo.Connection(
-            feedback_node,
+            feedback_node[:3],
             motor_control[:3],
             synapse=None
         )
