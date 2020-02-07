@@ -129,17 +129,17 @@ def run_everything(single_ens):
     # use keras model converted to nengo-dl
     use_keras = True
     # train or just validate
-    # train_on_data = True
+    train_on_data = False
     # load params from previous epoch
     load_net_params = True
     # save net params
-    save_net_params = True
+    save_net_params = False
     # show plots for processed data
     debug = False
     # show the images before and after scaling
     show_resized_image = debug
     # range of epochs
-    epochs = [11, 20]
+    epochs = [1, 100]
     n_steps = 1
     # training batch size
     n_training = 30000
@@ -162,6 +162,7 @@ def run_everything(single_ens):
     flatten = True
     if use_keras:
         flatten = False
+    final_errors = []
 
     # use training data in validation step
     # validate_with_training = False
@@ -398,7 +399,7 @@ def run_everything(single_ens):
                 (n_training, n_steps, output_dims))
         }
 
-        def predict(save_folder='', save_name='prediction_results', num_pts=100):
+        def predict(save_folder='', save_name='prediction_results', num_pts=100, final=False, final_errors=None):
             data = sim.predict(validation_images_dict, n_steps=n_steps, stateful=False)
             predictions = data[output_probe]
             predictions = np.asarray(predictions).squeeze()
@@ -408,13 +409,16 @@ def run_everything(single_ens):
                 overwrite=True)
             # print(predictions.shape)
 
+            x_err = np.linalg.norm(validation_targets[:, 0] - predictions[:, 0])
+            y_err = np.linalg.norm(validation_targets[:, 1] - predictions[:, 1])
+            final_errors.append([x_err, y_err])
             fig = plt.Figure()
             plt.subplot(211)
-            plt.title('X')
+            plt.title('X: %.3f' % x_err)
             plt.plot(validation_targets[-num_pts:, 0], label='target', color='r')
             plt.plot(predictions[-num_pts:, 0], label='predictions', color='k', linestyle='--')
             plt.subplot(212)
-            plt.title('Y')
+            plt.title('Y: %.3f' % y_err)
             plt.plot(validation_targets[-num_pts:, 1], label='target', color='r')
             plt.plot(predictions[-num_pts:, 1], label='predictions', color='k', linestyle='--')
             plt.legend()
@@ -422,9 +426,18 @@ def run_everything(single_ens):
             #plt.show()
             plt.close()
             fig = None
-            return data
 
-        # if train_on_data:
+            if final:
+                final_errors = np.array(final_errors)
+                plt.figure()
+                plt.subplot(211)
+                plt.title('X error over epochs')
+                plt.plot(final_errors[:, 0])
+                plt.subplot(212)
+                plt.title('Y error over epochs')
+                plt.plot(final_errors[:, 1])
+                plt.savefig('%s/final_epoch_error.png' % (save_folder))
+            return data
 
         print('Training')
         sim.compile(
@@ -443,8 +456,8 @@ def run_everything(single_ens):
                 sim.load_params('%s/%s_%i' % (save_folder, params_file, epoch-1))
                 print('loading pretrained network parameters')
 
-            # if train_on_data:
-            sim.fit(training_images_dict, training_targets_dict, epochs=1)
+            if train_on_data:
+                sim.fit(training_images_dict, training_targets_dict, epochs=1)
 
             # save parameters back into net
             sim.freeze_params(net)
@@ -453,7 +466,13 @@ def run_everything(single_ens):
                 print('saving network parameters to %s/%s_%i' % (save_folder, params_file, epoch))
                 sim.save_params('%s/%s_%i' % (save_folder, params_file, epoch))
 
-            predict_data = predict(save_folder=save_folder, save_name='prediction_epoch%i' % (epoch), num_pts=num_pts)
+            if epoch == epochs[1]-1:
+                final = True
+            else:
+                final = False
+
+            predict_data = predict(save_folder=save_folder, save_name='prediction_epoch%i' % (epoch),
+                    num_pts=num_pts, final=final, final_errors=final_errors)
 
         dat_results.save(
             data={'targets': validation_targets},
