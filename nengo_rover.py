@@ -20,8 +20,10 @@ import time
 import timeit
 import matplotlib.pyplot as plt
 import cv2
+import sys
 
 from nengo_loihi import decode_neurons
+import nengo_loihi
 from abr_control.arms.mujoco_config import MujocoConfig
 from abr_control.interfaces.mujoco import Mujoco
 from abr_analyze import DataHandler
@@ -35,6 +37,11 @@ class ExitSim(Exception):
 # set up parameters that depend on cpu or loihi as the backend
 backend = "cpu"
 adapt_scale = 1
+if len(sys.argv) > 1:
+    if sys.argv[1] == 'loihi':
+        backend = 'loihi'
+        #TODO do we need to change adapt_scale for loihi
+
 pes_learning_rate = 1e-5
 if len(sys.argv) > 1:
     for arg in sys.argv:
@@ -67,8 +74,9 @@ def resize_images(
 
         # select a subset of rows and update the vertical resolution
         if rows is not None:
-            rgb = rgb[rows[0]:rows[1], :, :]
-            res[0] = rows[1]-rows[0]
+            raise Exception
+            # rgb = rgb[rows[0]:rows[1], :, :]
+            # res[0] = rows[1]-rows[0]
 
         # resize image resolution
         if shape[1] != res[0] or shape[2] != res[1]:
@@ -95,13 +103,17 @@ def resize_images(
         if flatten:
             rgb = rgb.flatten()
         # scale image from -1 to 1 and save to list
-        scaled_image_data.append(rgb*2 - 1)
+        # scaled_image_data.append(rgb*2 - 1)
+        scaled_image_data.append(rgb)
 
     scaled_image_data = np.asarray(scaled_image_data)
 
     return scaled_image_data
 
-def demo():
+def demo(backend='cpu'):
+    if backend=='loihi':
+        nengo_loihi.set_defaults()
+
     seed = 9
     rng = np.random.RandomState(seed)
     # target generation limits
@@ -127,7 +139,7 @@ def demo():
     n_dof = 3  # 2 wheels to control
     n_input = 5  # input to neural net is body_com y velocity, error along (x, y) plane, and q dq feedback
     n_output = n_dof  # output from neural net is torque signals for the wheels
-    weights='saved_net_32x128_learn_xy'
+    weights='saved_net_32x128_99'
     # we stack feedback from 4 cameras to get a 2pi view
     render_size = [32, 32]
     res = [render_size[0], render_size[1] * 4]
@@ -139,7 +151,7 @@ def demo():
     strides = [1, 1, 1]
 
     dat = DataHandler(db_name='rover_vis_comparison')
-    test_name = 'combined_net_0004'
+    test_name = 'combined_net_1conv_layer_spiking_with_synapses'
     # dat.save(
     #     data={
     #             'render_frequency': render_frequency,
@@ -163,46 +175,55 @@ def demo():
     # set up our vision portion of the network in keras and convert to nengo_dl before adding other sections
     image_input = tf.keras.Input(shape=(res[0], res[1], 3), batch_size=minibatch_size)
 
+    relu_layer = tf.keras.layers.Activation(tf.nn.relu)(image_input)
+
     conv1 = tf.keras.layers.Conv2D(
         filters=filters[0],
         kernel_size=kernel_size[0],
         strides=strides[0],
-        use_bias=True,
+        # use_bias=True,
+        use_bias=False,
         activation=tf.nn.relu,
         data_format="channels_last",
         )
 
-    conv1_out = conv1(image_input)
+    conv1_out = conv1(relu_layer)
 
-    conv2 = tf.keras.layers.Conv2D(
-        filters=filters[1],
-        kernel_size=kernel_size[1],
-        strides=strides[1],
-        use_bias=True,
-        activation=tf.nn.relu,
-        data_format="channels_last",
-        )(conv1_out)
+    # conv2 = tf.keras.layers.Conv2D(
+    #     filters=filters[1],
+    #     kernel_size=kernel_size[1],
+    #     strides=strides[1],
+    #     # use_bias=True,
+    #     use_bias=False,
+    #     activation=tf.nn.relu,
+    #     data_format="channels_last",
+    #     )(conv1_out)
+    #
+    # conv3 = tf.keras.layers.Conv2D(
+    #     filters=filters[2],
+    #     kernel_size=kernel_size[2],
+    #     strides=strides[2],
+    #     # use_bias=True,
+    #     use_bias=False,
+    #     activation=tf.nn.relu,
+    #     data_format="channels_last",
+    #     )(conv2)
 
-    conv3 = tf.keras.layers.Conv2D(
-        filters=filters[2],
-        kernel_size=kernel_size[2],
-        strides=strides[2],
-        use_bias=True,
-        activation=tf.nn.relu,
-        data_format="channels_last",
-        )(conv2)
-
-    flatten = tf.keras.layers.Flatten()(conv3)
+    flatten = tf.keras.layers.Flatten()(conv1_out)
 
     vis_output_probe = tf.keras.layers.Dense(
         units=2,
+        use_bias=False
         )
 
     vis_output = vis_output_probe(flatten)
 
     model = tf.keras.Model(inputs=image_input, outputs=vis_output)
+    for layer in model.layers:
+        print(layer.output_shape)
+        print('=%i'%np.prod(layer.output_shape))
 
-    converter = nengo_dl.Converter(model)
+    converter = nengo_dl.Converter(model)#, swap_activations={tf.nn.relu: nengo.SpikingRectifiedLinear()})
     net = converter.net
     # get our vision connections from the nengo_dl converter
     vision_input = converter.inputs[image_input]
@@ -247,12 +268,110 @@ def demo():
         net.imgs = []
         net.predicted_xy = [0, 0]
         start = timeit.default_timer()
+
         def sim_func(t, x):
+
+            def render_vision_input():
+                # get our image data
+                if net.count % render_frequency == 0:
+                    net.imgs = []
+                    interface.sim.render(render_size[0], render_size[1], camera_name='vision1')
+                    #TODO rename the vision sensors so we can stack them sequentially by name
+                    net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision1', depth=False))
+                    net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision2', depth=False))
+                    net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision3', depth=False))
+                    net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision4', depth=False))
+
+                    net.imgs = (np.hstack(
+                            (np.array(
+                                np.hstack((net.imgs[3], net.imgs[0]))),
+                                np.hstack((net.imgs[2], net.imgs[1])))
+                        ))
+
+                    # save relevant data
+                    if generate_training_data:
+                        #TODO update where we save data as this may be broken from moving the local error calc to node
+                        print('Target Count: %i/%i ' % (int(net.count/render_frequency), n_targets))
+                        raise NotImplementedError
+                        save_data={
+                                'rgb': net.imgs,
+                                'target': viewer.target,
+                                'EE': robot_config.Tx('EE'),
+                                'EE_xmat': R_raw,
+                                'target': target,
+                            }
+
+                        dat.save(
+                            data=save_data,
+                            save_location='%s/data/%04d' % (test_name, net.count),
+                            overwrite=True)
+
+                    # save figure
+                    if save_rendered_fig:
+                        plt.Figure()
+                        plt.imshow(net.imgs, origin='lower')
+                        plt.title('%i' % net.count)
+                        plt.savefig('images/%04d.png'%net.count)
+                        plt.show()
+
+
+                    # get predicted target from vision
+                    net.imgs = resize_images(net.imgs, res=res, rows=None, show_resized_image=False, flatten=True).squeeze()
+
+                    # net.imgs = {
+                    #     vision_input: net.imgs.reshape(
+                    #         (1, 1, subpixels))
+                    # }
+
+                return net.imgs
+
+
+            def get_feedback():
+
+                error = viewer.target - robot_config.Tx('EE')
+                # model.geom_rgba[target_geom_id] = green if np.linalg.norm(error) < 0.02 else red
+
+                # error is in global coordinates, want it in local coordinates for rover --
+                # body_xmat will take from local coordinates to global
+                R_raw = np.copy(data.body_xmat[EE_id]).reshape(3, 3).T  # R.T = R^-1
+                # rotate it so the steering wheels point forward along y
+                theta = 3 * np.pi / 2
+                R90 = np.array([
+                    [np.cos(theta), -np.sin(theta), 0],
+                    [np.sin(theta), np.cos(theta), 0],
+                    [0, 0, 1]
+                ])
+                R = np.dot(R90, R_raw)
+                local_target = np.dot(R, error)
+                # print('-------------')
+                # print('calc target')
+                # print(net.count)
+                # print(viewer.target)
+                # print(robot_config.Tx)
+
+                # we also want the egocentric velocity of the rover
+                body_com_vel_raw = data.cvel[model.body_name2id('base_link')][3:]
+                body_com_vel = np.dot(R, body_com_vel_raw)
+
+                feedback = interface.get_feedback()
+                q = feedback['q']
+                dq = feedback['dq']
+
+                return np.array([body_com_vel[1], q[0], dq[0], local_target[0], local_target[1]])
+
+
             net.count += 1
             u = x[:3]
             prediction = x[3:5]
-            local_target = x[5:]
-
+            feedback = get_feedback()
+            local_target = feedback[3:]
+            output_signal = feedback[:3]
+            rendered_image = render_vision_input()
+            #TODO change this to index into an array
+            output_signal = np.hstack((output_signal, rendered_image))
+            # plt.figure()
+            # plt.imshow(output_signal[-subpixels:].reshape((res[0], res[1], 3)))
+            # plt.show()
 
             # print("MAIN SIM COUNT: ", net.count)
             if viewer.exit or net.count == sim_length:
@@ -293,99 +412,14 @@ def demo():
 
             if track_results and net.count % render_frequency == 0:
                 print('NET COUNT: ', net.count)
+                print('u: ', u)
+                print('prediction: ', prediction)
+                print('target: ', local_target)
                 motor_track.append(u)
                 prediction_track.append(prediction)
                 target_track.append(local_target)
 
-
-
-        def render_vision_input(t):
-            # get our image data
-            if net.count % render_frequency == 0:
-                net.imgs = []
-                interface.sim.render(render_size[0], render_size[1], camera_name='vision1')
-                #TODO rename the vision sensors so we can stack them sequentially by name
-                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision1', depth=False))
-                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision2', depth=False))
-                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision3', depth=False))
-                net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision4', depth=False))
-
-                net.imgs = (np.hstack(
-                        (np.array(
-                            np.hstack((net.imgs[3], net.imgs[0]))),
-                            np.hstack((net.imgs[2], net.imgs[1])))
-                    ))
-
-                # save relevant data
-                if generate_training_data:
-                    #TODO update where we save data as this may be broken from moving the local error calc to node
-                    print('Target Count: %i/%i ' % (int(net.count/render_frequency), n_targets))
-                    raise NotImplementedError
-                    save_data={
-                            'rgb': net.imgs,
-                            'target': viewer.target,
-                            'EE': robot_config.Tx('EE'),
-                            'EE_xmat': R_raw,
-                            'target': target,
-                        }
-
-                    dat.save(
-                        data=save_data,
-                        save_location='%s/data/%04d' % (test_name, net.count),
-                        overwrite=True)
-
-                # save figure
-                if save_rendered_fig:
-                    plt.Figure()
-                    plt.imshow(net.imgs, origin='lower')
-                    plt.title('%i' % net.count)
-                    plt.savefig('images/%04d.png'%net.count)
-                    plt.show()
-
-
-                # get predicted target from vision
-                net.imgs = resize_images(net.imgs, res=res, rows=None, show_resized_image=False, flatten=True).squeeze()
-
-                # net.imgs = {
-                #     vision_input: net.imgs.reshape(
-                #         (1, 1, subpixels))
-                # }
-
-            return net.imgs
-
-
-        def get_feedback(t):
-
-            error = viewer.target - robot_config.Tx('EE')
-            # model.geom_rgba[target_geom_id] = green if np.linalg.norm(error) < 0.02 else red
-
-            # error is in global coordinates, want it in local coordinates for rover --
-            # body_xmat will take from local coordinates to global
-            R_raw = np.copy(data.body_xmat[EE_id]).reshape(3, 3).T  # R.T = R^-1
-            # rotate it so the steering wheels point forward along y
-            theta = 3 * np.pi / 2
-            R90 = np.array([
-                [np.cos(theta), -np.sin(theta), 0],
-                [np.sin(theta), np.cos(theta), 0],
-                [0, 0, 1]
-            ])
-            R = np.dot(R90, R_raw)
-            local_target = np.dot(R, error)
-            print('-------------')
-            print('calc target')
-            print(net.count)
-            print(viewer.target)
-            print(robot_config.Tx)
-
-            # we also want the egocentric velocity of the rover
-            body_com_vel_raw = data.cvel[model.body_name2id('base_link')][3:]
-            body_com_vel = np.dot(R, body_com_vel_raw)
-
-            feedback = interface.get_feedback()
-            q = feedback['q']
-            dq = feedback['dq']
-
-            return np.array([body_com_vel[1], q[0], dq[0], local_target[0], local_target[1]])
+            return output_signal
 
 
         def steering_function(x):
@@ -410,16 +444,16 @@ def demo():
             kp = 1
             kv = 0.8
             u0 = kp * (turn_des- q) - kv * dq
-            u = np.array([u0, wheels, wheels])
+            u = np.array([u0, wheels, wheels, error[0], error[1]])
             return u
 
 
         # -----------------------------------------------------------------------------
-        sim = nengo.Node(sim_func, size_in=7, size_out=None)
+        sim = nengo.Node(sim_func, size_in=5, size_out=subpixels+3)
 
-        feedback_node = nengo.Node(get_feedback, size_in=None, size_out=5)
+        # feedback_node = nengo.Node(get_feedback, size_in=None, size_out=5)
 
-        render_node = nengo.Node(render_vision_input, size_in=None, size_out=subpixels)
+        # render_node = nengo.Node(render_vision_input, size_in=None, size_out=subpixels)
 
         n_motor_neurons = 1000
         encoders = nengo.dists.UniformHypersphere(surface=True).sample(n_motor_neurons, d=n_input)
@@ -432,52 +466,53 @@ def demo():
             seed=seed
         )
 
+        # send rendered image to vision network
         nengo.Connection(
-            vision_output,
-            sim[3:5],
-            synapse=None
-        )
-
-        nengo.Connection(
-            feedback_node[3:],
-            sim[5:],
-            synapse=None
-        )
-
-        nengo.Connection(
-            render_node,
+            sim[3:],
             vision_input,
-            synapse=None
+            # synapse=None
         )
 
+        # send vision prediction to sim for data collection
+        # nengo.Connection(
+        #     vision_output,
+        #     sim[3:5],
+        #     synapse=None
+        # )
+
+        # send vision prediction to motor control
         nengo.Connection(
             vision_output,
             motor_control[3:]
         )
 
+        # send motor feedback to motor control
         nengo.Connection(
-            feedback_node[:3],
+            sim[:3],
             motor_control[:3],
             synapse=None
         )
 
+        # send motor signal to sim
         nengo.Connection(
             motor_control,
             # onchip_output,
-            sim[:3],
+            sim[:5],
             function=steering_function
         )
+
 
     return net, robot_config
 
 
 if __name__ == "__main__":
-    net, robot_config = demo()
+    net, robot_config = demo(backend)
     try:
         if backend == "loihi":
             sim = nengo_loihi.Simulator(
-                net, target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
-            )
+                net, target='sim')
+            #     , target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
+            # )
         elif backend == "cpu":
             sim = nengo.Simulator(net, progress_bar=False)
 
