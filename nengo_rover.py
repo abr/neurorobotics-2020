@@ -369,9 +369,6 @@ def demo(backend='cpu'):
             rendered_image = render_vision_input()
             #TODO change this to index into an array
             output_signal = np.hstack((output_signal, rendered_image))
-            # plt.figure()
-            # plt.imshow(output_signal[-subpixels:].reshape((res[0], res[1], 3)))
-            # plt.show()
 
             # print("MAIN SIM COUNT: ", net.count)
             if viewer.exit or net.count == sim_length:
@@ -420,7 +417,6 @@ def demo(backend='cpu'):
                 target_track.append(local_target)
 
             return output_signal
-
 
         def steering_function(x):
             body_com_vely = x[0]
@@ -472,13 +468,6 @@ def demo(backend='cpu'):
             vision_input,
             # synapse=None
         )
-
-        # send vision prediction to sim for data collection
-        # nengo.Connection(
-        #     vision_output,
-        #     sim[3:5],
-        #     synapse=None
-        # )
 
         # send vision prediction to motor control
         nengo.Connection(

@@ -11,8 +11,19 @@ import time
 from abr_analyze import DataHandler
 import tensorflow as tf
 import math
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        # Currently, memory growth needs to be the same across GPUs
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+    except RuntimeError as e:
+        # Memory growth must be set before GPUs have been initialized
+        print(e)
 
-def run_everything(single_ens):
+def run_everything():
     def preprocess_data(
             image_data, res, show_resized_image, local_error, rows=None, debug=False, flatten=True):
 
@@ -26,7 +37,7 @@ def run_everything(single_ens):
         assert image_data.shape[3] == 3
 
         scaled_image_data = []
-        scaled_target_data = []
+        # scaled_target_data = []
         for count, data in enumerate(image_data):
             # normalize
             rgb = np.asarray(data)/255
@@ -56,7 +67,7 @@ def run_everything(single_ens):
             # scan the image for red pixels to determine target angle
             angle = math.atan2(local_error[count][1], local_error[count][0])
 
-            scaled_target_data.append(angle)
+            # scaled_target_data.append(angle)
 
             # if debug is on, show plots of the scaled image, predicted target
             # location, and target angle output
@@ -86,22 +97,25 @@ def run_everything(single_ens):
 
             # flatten to 1D
             #NOTE should use np.ravel to maintain image order
+            print('rgb pre: ', np.asarray(rgb).shape)
             if flatten:
-                rgb = rgb.flatten()
+                # rgb = rgb.flatten()
+                rgb = np.ravel(rgb)
+            print('rgb post: ', np.asarray(rgb).shape)
             # scale image from -1 to 1 and save to list
             # scaled_image_data.append(rgb*2 - 1)
-            scaled_image_data.append(rgb)
+            scaled_image_data.append(np.copy(rgb))
 
 
         scaled_image_data = np.asarray(scaled_image_data)
-        scaled_target_data = np.asarray(scaled_target_data)
+        # scaled_target_data = np.asarray(scaled_target_data)
 
-        return scaled_image_data, scaled_target_data
+        return scaled_image_data #, scaled_target_data
 
 
     def load_data(
             res, db_name, label='training_0000', n_imgs=None, rows=None, debug=False, show_resized_image=False,
-            flatten=True):
+            flatten=True, n_steps=1):
         dat = DataHandler(db_name)
 
         # load training images
@@ -109,16 +123,24 @@ def run_everything(single_ens):
         training_targets = []
         for nn in range(0, n_imgs):
             data = dat.load(parameters=['rgb', 'local_error'], save_location='%s/data/%04d' % (label, nn))
+            # for ii in range(n_steps):
             training_images.append(data['rgb'])
             training_targets.append(data['local_error'])
 
         # scale image resolution
         # training_images, training_targets = preprocess_data(
-        training_images, _ = preprocess_data(
+        training_images = preprocess_data(
             image_data=training_images, debug=debug,
             res=res, show_resized_image=show_resized_image, rows=rows,
             flatten=flatten, local_error=training_targets)
         training_targets = np.asarray(training_targets)[:, 0:2]
+
+        print('images pre_tile: ', training_images.shape)
+        print('targets pre_tile: ', training_targets.shape)
+        training_images = np.tile(training_images[:, None, :], (1, n_steps, 1))
+        training_targets = np.tile(training_targets[:, None, :], (1, n_steps, 1))
+        print('images post_tile: ', training_images.shape)
+        print('targets post_tile: ', training_targets.shape)
 
         return training_images, training_targets
 
@@ -126,8 +148,6 @@ def run_everything(single_ens):
     db_name = 'rover_training_0004'
     # db_name = 'rover_dist_range_0_marked'
     save_db_name = '%s_results' % db_name
-    # use keras model converted to nengo-dl
-    use_keras = True
     # train or just validate
     train_on_data = False
     # load params from previous epoch
@@ -139,13 +159,13 @@ def run_everything(single_ens):
     # show the images before and after scaling
     show_resized_image = debug
     # range of epochs
-    epochs = [1, 100]
-    n_steps = 1
+    epochs = [99, 99]
+    n_steps = 100
     # training batch size
     n_training = 30000
-    minibatch_size = 100
+    minibatch_size = 10
     # validation batch size
-    n_validation = 1000
+    n_validation = 10
     output_dims = 2
     n_neurons = 20000
     gain = 100
@@ -160,27 +180,22 @@ def run_everything(single_ens):
     seed = 0
     np.random.seed(seed)
     flatten = True
-    if use_keras:
-        flatten = False
     final_errors = []
 
     # use training data in validation step
     # validate_with_training = False
 
-    #save_name = 'image_input-to-dense_layer_neurons-norm_input_weights_10k-gain_bias'
-    # save_name = 'version_that_works_specifying_enc_30k'
-    save_name = 'learning_xy_optimized_1_conv'
+    # save_name = 'learning_xy_optimized_1_conv_with_relu_spiking'
+    save_name = 'debug'
     params_file = 'saved_net_%ix%i' % (res[0], res[1])
-    if use_keras:
-        save_folder = 'data/%s/keras/%s/%s' % (db_name, params_file, save_name)
-    else:
-        save_folder = 'data/%s/nengo_dl/%s/%s' % (db_name, params_file, save_name)
+    save_folder = 'data/%s/keras/%s/%s' % (db_name, params_file, save_name)
 
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
     notes = (
     '''
+    \n- missed connection to relu_layer before
     \n- bias off on all layer, loihi restriction
     \n- default kernel initializers
     \n- 1 conv layers 1 dense (removed conv 2 and 3)
@@ -190,7 +205,6 @@ def run_everything(single_ens):
             )
 
     test_params = {
-        'use_keras': use_keras,
         'n_training': n_training,
         'minibatch_size': minibatch_size,
         'n_neurons': n_neurons,
@@ -203,254 +217,174 @@ def run_everything(single_ens):
     dat_results = DataHandler(db_name=save_db_name)
     dat_results.save(data=test_params, save_location='%s/params'%save_folder, overwrite=True)
 
-    # load data
-    training_images, training_targets = load_data(
-        res=res, label='training_0000', n_imgs=n_training, rows=rows,
-        debug=debug, show_resized_image=show_resized_image, db_name=db_name,
-        flatten=flatten)
+    if train_on_data:
+        # load data
+        training_images, training_targets = load_data(
+            res=res, label='training_0000', n_imgs=n_training, rows=rows,
+            debug=debug, show_resized_image=show_resized_image, db_name=db_name,
+            flatten=flatten, n_steps=n_steps)
 
-    # if validate_with_training:
-    #     # images are flattened at this point, need to find how
-    #     # many pixels per image
-    #     n_val = int(n_validation * len(training_images) / n_training)
-    #     validation_images=training_images[:n_val]
-    #     n_val = int(n_validation * len(training_targets) / n_training)
-    #     validation_targets=training_targets[:n_val]
-    # else:
     validation_images, validation_targets = load_data(
         res=res, label='validation_0000', n_imgs=n_validation, rows=rows,
         debug=debug, show_resized_image=show_resized_image, db_name=db_name,
-        flatten=flatten)
+        flatten=flatten, n_steps=n_steps)
 
-    # for im in training_images:
-    #     plt.figure()
-    #     plt.imshow(im)
-    #     plt.show()
     test_print = ('Running tests for %s' % save_folder)
     print('\n')
-    print('Training Images: ', training_images.shape)
+    if train_on_data:
+        print('Training Images: ', training_images.shape)
     print('Validation Images: ', validation_images.shape)
     print('-'*len(test_print))
     print(test_print)
     print('-'*len(test_print))
     print('\n')
+
     # ---------------------------------------Define network
-    if not use_keras:
-        raise Exception
-        # # single_ens = True
-        #
-        # weights_in = nengo.dists.UniformHypersphere(
-        #     surface=True).sample(n_neurons, subpixels, rng=np.random.RandomState(seed=0))
-        #
-        # if single_ens:
-        #     #VERSION THAT WORKS
-        #     net = nengo.Network(seed=seed)
-        #     net.config[nengo.Ensemble].neuron_type = nengo.RectifiedLinear()
-        #     net.config[nengo.Ensemble].gain = nengo.dists.Choice([gain])
-        #     net.config[nengo.Ensemble].bias = nengo.dists.Choice([bias])
-        #     net.config[nengo.Connection].synapse = None
-        #
-        #     with net:
-        #         image_input = nengo.Node(np.zeros(subpixels))
-        #         dense_layer = nengo.Ensemble(
-        #             n_neurons=n_neurons,
-        #             dimensions=subpixels,
-        #             encoders=weights_in)
-        #         image_output = nengo.Node(size_in=output_dims)
-        #
-        #         input_conn = nengo.Connection(
-        #             image_input, dense_layer, label='input_to_ens', seed=0)
-        #         # nengo_dl.configure_settings(trainable=None)
-        #         # net.config[input_conn].trainable = False
-        #
-        #         nengo.Connection(
-        #             dense_layer.neurons,
-        #             image_output,
-        #             label='output_conn',
-        #             transform=np.zeros(
-        #                 (output_dims, dense_layer.n_neurons)),
-        #             seed=0
-        #             )
-        #
-        #         output_probe = nengo.Probe(image_output, synapse=None, label='output_filtered')
-        #         neuron_probe = nengo.Probe(dense_layer.neurons, synapse=None, label='single_layer_neuron_probe')
-        #
-        #         # Training, turn off synapses for training to simplify
-        #         for conn in net.all_connections:
-        #             conn.synapse = None
-        #
-        # else:
-        #     # breaking up into dense_node and dense_layer
-        #     net = nengo.Network(seed=seed)
-        #
-        #     net.config[nengo.Ensemble].neuron_type = nengo.RectifiedLinear()
-        #     net.config[nengo.Ensemble].gain = nengo.dists.Choice([1])
-        #     net.config[nengo.Ensemble].bias = nengo.dists.Choice([bias])
-        #     net.config[nengo.Connection].synapse = None
-        #
-        #     with net:
-        #
-        #         image_input = nengo.Node(np.zeros(subpixels))
-        #         # dense_node = nengo.Node(size_in=subpixels)
-        #         dense_layer = nengo.Ensemble(
-        #             n_neurons=n_neurons,
-        #             dimensions=subpixels,
-        #             encoders=weights_in)
-        #         image_output = nengo.Node(size_in=output_dims)
-        #
-        #         # nengo.Connection(
-        #         #     image_input, dense_node, seed=0)
-        #
-        #         # nengo.Connection(
-        #         #     dense_node, dense_layer.neurons, transform=weights_in, label='input_to_neurons', seed=0)
-        #
-        #         nengo.Connection(
-        #             image_input, dense_layer.neurons, transform=weights_in*gain, label='input_to_neurons', seed=0)
-        #
-        #         nengo.Connection(
-        #             dense_layer.neurons,
-        #             image_output,
-        #             label='output_conn',
-        #             transform=np.zeros(
-        #                 (output_dims, dense_layer.n_neurons)),
-        #             seed=0
-        #             )
-        #
-        #         output_probe = nengo.Probe(image_output, synapse=None, label='output_filtered')
-        #         neuron_probe = nengo.Probe(dense_layer.neurons, synapse=None, label='single_layer_neuron_probe')
-        #
-        #         # Training, turn off synapses for training to simplify
-        #         for conn in net.all_connections:
-        #             conn.synapse = None
-        #
-    else:
-        image_input = tf.keras.Input(shape=(res[0], res[1], 3), batch_size=minibatch_size)
+    image_input = tf.keras.Input(shape=(res[0], res[1], 3), batch_size=minibatch_size)
+    # image_input = tf.keras.Input(shape=subpixels) #, batch_size=minibatch_size)
 
-        relu_layer = tf.keras.layers.Activation(tf.nn.relu)(image_input)
+    relu_layer = tf.keras.layers.Activation(tf.nn.relu)(image_input)
 
-        conv1 = tf.keras.layers.Conv2D(
-            filters=32,
-            kernel_size=3,
-            strides=1,
-            # use_bias=True,
-            use_bias=False,
-            activation=tf.nn.relu,
-            # kernel_initializer=keras.initializers.Zeros(),
-            data_format="channels_last",
-            # padding='same'
-            # )(relu_layer)
-            )(image_input)
+    conv1 = tf.keras.layers.Conv2D(
+        filters=32,
+        kernel_size=3,
+        strides=1,
+        # use_bias=True,
+        use_bias=False,
+        activation=tf.nn.relu,
+        # kernel_initializer=keras.initializers.Zeros(),
+        data_format="channels_last",
+        # padding='same'
+        # )(relu_layer)
+        )
 
-        # conv2 = tf.keras.layers.Conv2D(
-        #     filters=64,
-        #     kernel_size=3,
-        #     strides=1,
-        #     # use_bias=True,
-        #     use_bias=False,
-        #     activation=tf.nn.relu,
-        #     # kernel_initializer=keras.initializers.Zeros(),
-        #     data_format="channels_last",
-        #     # padding='same'
-        #     )(conv1)
+    conv1_out = conv1(relu_layer)
 
-        # conv3 = tf.keras.layers.Conv2D(
-        #     filters=128,
-        #     kernel_size=3,
-        #     strides=1,
-        #     # use_bias=True,
-        #     use_bias=False,
-        #     activation=tf.nn.relu,
-        #     # kernel_initializer=keras.initializers.Zeros(),
-        #     data_format="channels_last",
-        #     # padding='same'
-        #     )(conv2)
+    flatten = tf.keras.layers.Flatten()(conv1_out)
 
-        flatten = tf.keras.layers.Flatten()(conv1)
+    keras_dense = tf.keras.layers.Dense(
+        units=output_dims,
+        use_bias=False,
+        #kernel_initializer=keras.initializers.Zeros()
+        )
+    keras_output_probe = keras_dense(flatten)
 
-        output_probe = tf.keras.layers.Dense(
-            units=output_dims,
-            use_bias=False,
-            #kernel_initializer=keras.initializers.Zeros()
-            )(flatten)
+    model = tf.keras.Model(inputs=image_input, outputs=keras_output_probe)
 
-        model = tf.keras.Model(inputs=image_input, outputs=output_probe)
+    # converter = nengo_dl.Converter(model)
+    converter = nengo_dl.Converter(model, swap_activations={tf.nn.relu: nengo.SpikingRectifiedLinear()})
+    image_input = converter.inputs[image_input]
+    # output_probe = converter.outputs[keras_output_probe]
+    output_probe = converter.outputs[keras_output_probe]
+    # nengo_dense = converter.layer_map[conv1][0][0]
+    # for val in nengo_dense:
+    #     print(val)
+    # nengo_dense.max_rates = np.ones(nengo_dense.n_neurons) * 1000
+    net = converter.net
 
-        converter = nengo_dl.Converter(model)
-        image_input = converter.inputs[image_input]
-        output_probe = converter.outputs[output_probe]
-        net = converter.net
+    # for layer in converter.layer_map:
+    #     print(layer)
+    for conn in net.all_connections:
+        conn.synapse = 0.005
+
+    # output_probe.max_rates = nengo.dists.Choice(1000)
+    #
+
 
     with nengo_dl.Simulator(net, minibatch_size=minibatch_size, seed=seed) as sim:
+        scale = 100
 
-        training_images_dict = {
-            image_input: training_images.reshape(
-                (n_training, n_steps, subpixels))
-        }
+        if train_on_data:
+            training_images *= scale
+            training_images_dict = {
+                image_input: training_images.reshape(
+                    (n_training, n_steps, subpixels))
+            }
 
+        validation_images *= scale
         validation_images_dict = {
             image_input: validation_images.reshape(
                 (n_validation, n_steps, subpixels))
         }
 
 
-        training_targets_dict = {
-            #output_probe_no_filter: training_targets.reshape(
-            output_probe: training_targets.reshape(
-                (n_training, n_steps, output_dims))
-        }
+        if train_on_data:
+            training_targets_dict = {
+                #output_probe_no_filter: training_targets.reshape(
+                output_probe: training_targets.reshape(
+                    (n_training, n_steps, output_dims))
+            }
 
-        def predict(save_folder='', save_name='prediction_results', num_pts=100, final=False, final_errors=None):
-            data = sim.predict(validation_images_dict, n_steps=n_steps, stateful=False)
+        def predict(
+                input_data_dict, target_vals,
+                save_folder='', save_name='prediction_results', num_pts=100,
+                final=False, final_errors=None):
+
+            print('input shape: ', input_data_dict[image_input].shape)
+            data = sim.predict(input_data_dict, n_steps=n_steps, stateful=False)
             predictions = data[output_probe]
             predictions = np.asarray(predictions).squeeze()
             dat_results.save(
                 data={save_name: predictions},
                 save_location=save_folder,
                 overwrite=True)
-            # print(predictions.shape)
+            print('targets shape: ', target_vals.shape)
+            print('prediction shape: ', predictions.shape)
+            # plt.figure()
+            # plt.plot(predictions[0, :, :10])
+            # plt.show()
+            if predictions.ndim > 2:
+                shape = np.asarray(predictions).shape
+                predictions = np.asarray(predictions).reshape(shape[0]*shape[1], shape[2])
+                print('pred reshape: ', predictions.shape)
+            if target_vals.ndim > 2:
+                shape = np.asarray(target_vals).shape
+                target_vals = np.asarray(target_vals).reshape(shape[0]*shape[1], shape[2])
+                print('targets reshape: ', target_vals.shape)
 
-            x_err = np.linalg.norm(validation_targets[:, 0] - predictions[:, 0])
-            y_err = np.linalg.norm(validation_targets[:, 1] - predictions[:, 1])
+            x_err = np.linalg.norm(target_vals[:, 0] - predictions[:, 0])
+            y_err = np.linalg.norm(target_vals[:, 1] - predictions[:, 1])
             final_errors.append([x_err, y_err])
             fig = plt.Figure()
             plt.subplot(211)
             plt.title('X: %.3f' % x_err)
-            plt.plot(validation_targets[-num_pts:, 0], label='target', color='r')
+            plt.plot(target_vals[-num_pts:, 0], label='target', color='r')
             plt.plot(predictions[-num_pts:, 0], label='predictions', color='k', linestyle='--')
             plt.subplot(212)
             plt.title('Y: %.3f' % y_err)
-            plt.plot(validation_targets[-num_pts:, 1], label='target', color='r')
+            plt.plot(target_vals[-num_pts:, 1], label='target', color='r')
             plt.plot(predictions[-num_pts:, 1], label='predictions', color='k', linestyle='--')
             plt.legend()
             plt.savefig('%s/%s.png' % (save_folder, save_name))
-            #plt.show()
+            plt.show()
             plt.close()
             fig = None
 
-            if final:
-                final_errors = np.array(final_errors)
-                plt.figure()
-                plt.subplot(211)
-                plt.title('X error over epochs')
-                plt.plot(final_errors[:, 0])
-                plt.subplot(212)
-                plt.title('Y error over epochs')
-                plt.plot(final_errors[:, 1])
-                plt.savefig('%s/final_epoch_error.png' % (save_folder))
+            # if final:
+            #     final_errors = np.array(final_errors)
+            #     plt.figure()
+            #     plt.subplot(211)
+            #     plt.title('X error over epochs')
+            #     plt.plot(final_errors[:, 0])
+            #     plt.subplot(212)
+            #     plt.title('Y error over epochs')
+            #     plt.plot(final_errors[:, 1])
+            #     plt.savefig('%s/final_epoch_error.png' % (save_folder))
             return data
 
-        print('Training')
-        sim.compile(
-            # optimizer=tf.optimizers.SGD(1e-5),
-            optimizer=tf.optimizers.RMSprop(0.001),
-            # # loss={output_probe_no_filter: tf.losses.mse})
-            loss={output_probe: tf.losses.mse})
+        if train_on_data:
+            print('Training')
+            sim.compile(
+                # optimizer=tf.optimizers.SGD(1e-5),
+                optimizer=tf.optimizers.RMSprop(0.001),
+                # # loss={output_probe_no_filter: tf.losses.mse})
+                loss={output_probe: tf.losses.mse})
 
         if isinstance(epochs, int):
             epochs = [1, epochs]
 
         for epoch in range(epochs[0]-1, epochs[1]):
-            num_pts = 100
+            num_pts = n_steps * min(n_validation, 10)
             print('\n\nEPOCH %i\n' % epoch)
             if load_net_params and epoch>0:
                 sim.load_params('%s/%s_%i' % (save_folder, params_file, epoch-1))
@@ -471,7 +405,9 @@ def run_everything(single_ens):
             else:
                 final = False
 
-            predict_data = predict(save_folder=save_folder, save_name='prediction_epoch%i' % (epoch),
+            predict_data = predict(
+                    input_data_dict=validation_images_dict, target_vals=validation_targets,
+                    save_folder=save_folder, save_name='prediction_epoch%i' % (epoch),
                     num_pts=num_pts, final=final, final_errors=final_errors)
 
         dat_results.save(
@@ -480,11 +416,4 @@ def run_everything(single_ens):
             overwrite=True)
         # return predict_data[neuron_probe]
 
-single_layer = run_everything(single_ens=True)
-# split_layer = run_everything(single_ens=False)
-# print('SINGLE LAYER')
-# print(single_layer)
-# print('\nSPLIT LAYER')
-# print(split_layer)
-# assert np.allclose(single_layer, split_layer)
-#
+single_layer = run_everything()
