@@ -97,11 +97,9 @@ def run_everything():
 
             # flatten to 1D
             #NOTE should use np.ravel to maintain image order
-            print('rgb pre: ', np.asarray(rgb).shape)
             if flatten:
                 # rgb = rgb.flatten()
                 rgb = np.ravel(rgb)
-            print('rgb post: ', np.asarray(rgb).shape)
             # scale image from -1 to 1 and save to list
             # scaled_image_data.append(rgb*2 - 1)
             scaled_image_data.append(np.copy(rgb))
@@ -146,29 +144,40 @@ def run_everything():
 
     warnings.simplefilter("ignore")
     db_name = 'rover_training_0004'
+    spiking = True
     # db_name = 'rover_dist_range_0_marked'
     save_db_name = '%s_results' % db_name
     # train or just validate
-    train_on_data = False
+    train_on_data = True
+    if spiking:
+        train_on_data = False
     # load params from previous epoch
     load_net_params = True
-    # save net params
-    save_net_params = False
+    # save net params only if training
+    save_net_params = train_on_data
     # show plots for processed data
     debug = False
     # show the images before and after scaling
     show_resized_image = debug
     # range of epochs
-    epochs = [99, 99]
-    n_steps = 100
+    epochs = [30, 30]
+    if not spiking:
+        n_steps = 1
+        gain_scale = 1
+        synapses = None
+    else:
+        n_steps = 500
+        gain_scale = 200
+        save_net_params = False
+        synapses = 0.05
     # training batch size
     n_training = 30000
-    minibatch_size = 10
+    minibatch_size = 100
     # validation batch size
-    n_validation = 10
+    n_validation = 100
+    minibatch_size = min(minibatch_size, n_validation)
     output_dims = 2
-    n_neurons = 20000
-    gain = 100
+    gain = 1
     bias = 0
     # resolution to scale images to
     res=[32, 128]
@@ -180,13 +189,12 @@ def run_everything():
     seed = 0
     np.random.seed(seed)
     flatten = True
-    final_errors = []
 
     # use training data in validation step
     # validate_with_training = False
 
     # save_name = 'learning_xy_optimized_1_conv_with_relu_spiking'
-    save_name = 'debug'
+    save_name = 'filters_64'
     params_file = 'saved_net_%ix%i' % (res[0], res[1])
     save_folder = 'data/%s/keras/%s/%s' % (db_name, params_file, save_name)
 
@@ -195,10 +203,10 @@ def run_everything():
 
     notes = (
     '''
-    \n- missed connection to relu_layer before
+    \n- retraining with more filters so we get more neurons in our spiking net
     \n- bias off on all layer, loihi restriction
     \n- default kernel initializers
-    \n- 1 conv layers 1 dense (removed conv 2 and 3)
+    \n- 1 conv layers 1 dense
     \n- adding relu layer between input and conv1 due to loihi comm restriction
     \n- changing image scaling from -1 to 1, to 0 to 1 due to loihi comm restriction
     '''
@@ -207,7 +215,6 @@ def run_everything():
     test_params = {
         'n_training': n_training,
         'minibatch_size': minibatch_size,
-        'n_neurons': n_neurons,
         'res': res,
         'seed': seed,
         'notes': notes,
@@ -216,6 +223,7 @@ def run_everything():
 
     dat_results = DataHandler(db_name=save_db_name)
     dat_results.save(data=test_params, save_location='%s/params'%save_folder, overwrite=True)
+
 
     if train_on_data:
         # load data
@@ -243,59 +251,65 @@ def run_everything():
     image_input = tf.keras.Input(shape=(res[0], res[1], 3), batch_size=minibatch_size)
     # image_input = tf.keras.Input(shape=subpixels) #, batch_size=minibatch_size)
 
-    relu_layer = tf.keras.layers.Activation(tf.nn.relu)(image_input)
+    relu_layer = tf.keras.layers.Activation(tf.nn.relu)
+    relu_out = relu_layer(image_input)
 
     conv1 = tf.keras.layers.Conv2D(
-        filters=32,
+        filters=64,
         kernel_size=3,
         strides=1,
-        # use_bias=True,
         use_bias=False,
         activation=tf.nn.relu,
-        # kernel_initializer=keras.initializers.Zeros(),
         data_format="channels_last",
-        # padding='same'
-        # )(relu_layer)
         )
 
-    conv1_out = conv1(relu_layer)
+    conv1_out = conv1(relu_out)
 
     flatten = tf.keras.layers.Flatten()(conv1_out)
 
     keras_dense = tf.keras.layers.Dense(
         units=output_dims,
         use_bias=False,
-        #kernel_initializer=keras.initializers.Zeros()
         )
     keras_output_probe = keras_dense(flatten)
 
     model = tf.keras.Model(inputs=image_input, outputs=keras_output_probe)
 
-    # converter = nengo_dl.Converter(model)
-    converter = nengo_dl.Converter(model, swap_activations={tf.nn.relu: nengo.SpikingRectifiedLinear()})
+    if not spiking:
+        converter = nengo_dl.Converter(model)
+    else:
+        converter = nengo_dl.Converter(
+            model,
+            swap_activations={
+                tf.nn.relu: nengo.SpikingRectifiedLinear(amplitude=1/gain_scale)
+                }
+        )
+
+    # IO objects
     image_input = converter.inputs[image_input]
-    # output_probe = converter.outputs[keras_output_probe]
     output_probe = converter.outputs[keras_output_probe]
-    # nengo_dense = converter.layer_map[conv1][0][0]
-    # for val in nengo_dense:
-    #     print(val)
-    # nengo_dense.max_rates = np.ones(nengo_dense.n_neurons) * 1000
+
+    # ensemble objects
+    nengo_conv = converter.layer_map[conv1][0][0]
+    nengo_relu = converter.layer_map[relu_layer][0][0]
+
+    # adjust gains and synapses
+    nengo_conv.ensemble.gain = nengo.dists.Choice([gain * gain_scale])
+    nengo_relu.ensemble.gain = nengo.dists.Choice([gain * gain_scale])
+    print('MAX RATES: ',nengo_conv.ensemble)
+
     net = converter.net
-
-    # for layer in converter.layer_map:
-    #     print(layer)
     for conn in net.all_connections:
-        conn.synapse = 0.005
+        conn.synapse = synapses
 
-    # output_probe.max_rates = nengo.dists.Choice(1000)
-    #
 
 
     with nengo_dl.Simulator(net, minibatch_size=minibatch_size, seed=seed) as sim:
-        scale = 100
+        scale = 1
+        print('in sim gain: ', sim.data[nengo_conv.ensemble].gain)
 
         if train_on_data:
-            training_images *= scale
+            # training_images *= scale
             training_images_dict = {
                 image_input: training_images.reshape(
                     (n_training, n_steps, subpixels))
@@ -317,22 +331,15 @@ def run_everything():
 
         def predict(
                 input_data_dict, target_vals,
-                save_folder='', save_name='prediction_results', num_pts=100,
-                final=False, final_errors=None):
+                save_folder='', save_name='prediction_results', num_pts=100):
 
             print('input shape: ', input_data_dict[image_input].shape)
             data = sim.predict(input_data_dict, n_steps=n_steps, stateful=False)
             predictions = data[output_probe]
             predictions = np.asarray(predictions).squeeze()
-            dat_results.save(
-                data={save_name: predictions},
-                save_location=save_folder,
-                overwrite=True)
             print('targets shape: ', target_vals.shape)
             print('prediction shape: ', predictions.shape)
-            # plt.figure()
-            # plt.plot(predictions[0, :, :10])
-            # plt.show()
+
             if predictions.ndim > 2:
                 shape = np.asarray(predictions).shape
                 predictions = np.asarray(predictions).reshape(shape[0]*shape[1], shape[2])
@@ -344,7 +351,8 @@ def run_everything():
 
             x_err = np.linalg.norm(target_vals[:, 0] - predictions[:, 0])
             y_err = np.linalg.norm(target_vals[:, 1] - predictions[:, 1])
-            final_errors.append([x_err, y_err])
+
+
             fig = plt.Figure()
             plt.subplot(211)
             plt.title('X: %.3f' % x_err)
@@ -356,21 +364,39 @@ def run_everything():
             plt.plot(predictions[-num_pts:, 1], label='predictions', color='k', linestyle='--')
             plt.legend()
             plt.savefig('%s/%s.png' % (save_folder, save_name))
-            plt.show()
+            # plt.show()
             plt.close()
             fig = None
 
-            # if final:
-            #     final_errors = np.array(final_errors)
-            #     plt.figure()
-            #     plt.subplot(211)
-            #     plt.title('X error over epochs')
-            #     plt.plot(final_errors[:, 0])
-            #     plt.subplot(212)
-            #     plt.title('Y error over epochs')
-            #     plt.plot(final_errors[:, 1])
-            #     plt.savefig('%s/final_epoch_error.png' % (save_folder))
-            return data
+            if not spiking:
+                #TODO: fix this because we keep appending, need to attach value to an epoch and overwrite
+                final_errors = dat_results.load(
+                    parameters=['final_errors'],
+                    save_location=save_folder)['final_errors']
+                if final_errors.ndim == 0:
+                    final_errors = []
+
+                final_errors = np.vstack((final_errors, [x_err, y_err]))
+
+                final_errors = np.asarray(final_errors)
+                plt.figure()
+                plt.subplot(211)
+                plt.title('X error over epochs')
+                plt.plot(final_errors[:, 0])
+                plt.subplot(212)
+                plt.title('Y error over epochs')
+                plt.plot(final_errors[:, 1])
+                plt.savefig('%s/final_epoch_error.png' % (save_folder))
+
+                save_data = {save_name: predictions, 'final_errors': final_errors}
+
+            else:
+                save_data = {save_name: predictions}
+
+            dat_results.save(
+                data=save_data,
+                save_location=save_folder,
+                overwrite=True)
 
         if train_on_data:
             print('Training')
@@ -381,39 +407,48 @@ def run_everything():
                 loss={output_probe: tf.losses.mse})
 
         if isinstance(epochs, int):
-            epochs = [1, epochs]
+            epochs = [0, epochs]
 
-        for epoch in range(epochs[0]-1, epochs[1]):
-            num_pts = n_steps * min(n_validation, 10)
+        for epoch in range(epochs[0], epochs[1]):
+            num_imgs_to_show = 10
+            num_pts = num_imgs_to_show*n_steps #3*int(max(n_steps, min(n_validation, 100)))
             print('\n\nEPOCH %i\n' % epoch)
             if load_net_params and epoch>0:
-                sim.load_params('%s/%s_%i' % (save_folder, params_file, epoch-1))
-                print('loading pretrained network parameters')
+                prev_params_loc = ('%s/%s_%i' % (save_folder, params_file, epoch-1))
+                print('loading pretrained network parameters from \n%s' % prev_params_loc)
+                sim.load_params(prev_params_loc)
 
             if train_on_data:
+                print('Training...')
                 sim.fit(training_images_dict, training_targets_dict, epochs=1)
 
             # save parameters back into net
             sim.freeze_params(net)
 
             if save_net_params:
-                print('saving network parameters to %s/%s_%i' % (save_folder, params_file, epoch))
-                sim.save_params('%s/%s_%i' % (save_folder, params_file, epoch))
+                current_params_loc = '%s/%s_%i' % (save_folder, params_file, epoch)
+                print('saving network parameters to %s' % current_params_loc)
+                sim.save_params(current_params_loc)
 
-            if epoch == epochs[1]-1:
-                final = True
+            if train_on_data:
+                # we're predicting using the weights from this epoch
+                save_name='prediction_epoch%i' % (epoch)
             else:
-                final = False
+                if spiking:
+                    prefix = 'spiking_'
+                else:
+                    prefix = ''
+                # we're running inference using the previous weights
+                save_name='%sinference_epoch%i' % (prefix, epoch)
 
-            predict_data = predict(
+            predict(
                     input_data_dict=validation_images_dict, target_vals=validation_targets,
-                    save_folder=save_folder, save_name='prediction_epoch%i' % (epoch),
-                    num_pts=num_pts, final=final, final_errors=final_errors)
+                    save_folder=save_folder, save_name=save_name,
+                    num_pts=num_pts)
 
         dat_results.save(
             data={'targets': validation_targets},
             save_location=save_folder,
             overwrite=True)
-        # return predict_data[neuron_probe]
 
 single_layer = run_everything()
