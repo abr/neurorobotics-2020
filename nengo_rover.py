@@ -121,13 +121,13 @@ def demo(backend='cpu'):
     angle_limit = [-np.pi, np.pi]
 
     # data collection parameters
-    generate_training_data = False
+    generate_training_data = True
     save_rendered_fig = False
-    track_results = True
+    track_results = False
     target_track = []
     prediction_track = []
     motor_track = []
-    n_targets = 100
+    n_targets = 1000
     # in steps (1ms/step)
     render_frequency = 1
     reaching_steps = 1
@@ -139,7 +139,8 @@ def demo(backend='cpu'):
     n_dof = 3  # 2 wheels to control
     n_input = 5  # input to neural net is body_com y velocity, error along (x, y) plane, and q dq feedback
     n_output = n_dof  # output from neural net is torque signals for the wheels
-    weights='saved_net_32x128_99'
+    # weights='saved_net_32x128_99'
+    weights = None
     # we stack feedback from 4 cameras to get a 2pi view
     render_size = [32, 32]
     res = [render_size[0], render_size[1] * 4]
@@ -150,8 +151,9 @@ def demo(backend='cpu'):
     kernel_size = [3, 3, 3]
     strides = [1, 1, 1]
 
-    dat = DataHandler(db_name='rover_vis_comparison')
-    test_name = 'combined_net_1conv_layer_spiking_with_synapses'
+    dat = DataHandler(db_name='circular_targets')
+    # test_name = 'combined_net_1conv_layer_spiking_with_synapses'
+    test_name = 'validation_0000'
     # dat.save(
     #     data={
     #             'render_frequency': render_frequency,
@@ -282,46 +284,14 @@ def demo(backend='cpu'):
                     net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision3', depth=False))
                     net.imgs.append(interface.sim.render(render_size[0], render_size[1], camera_name='vision4', depth=False))
 
-                    net.imgs = (np.hstack(
+                    net.raw_img = (np.hstack(
                             (np.array(
                                 np.hstack((net.imgs[3], net.imgs[0]))),
                                 np.hstack((net.imgs[2], net.imgs[1])))
                         ))
 
-                    # save relevant data
-                    if generate_training_data:
-                        #TODO update where we save data as this may be broken from moving the local error calc to node
-                        print('Target Count: %i/%i ' % (int(net.count/render_frequency), n_targets))
-                        raise NotImplementedError
-                        save_data={
-                                'rgb': net.imgs,
-                                'target': viewer.target,
-                                'EE': robot_config.Tx('EE'),
-                                'EE_xmat': R_raw,
-                                'target': target,
-                            }
-
-                        dat.save(
-                            data=save_data,
-                            save_location='%s/data/%04d' % (test_name, net.count),
-                            overwrite=True)
-
-                    # save figure
-                    if save_rendered_fig:
-                        plt.Figure()
-                        plt.imshow(net.imgs, origin='lower')
-                        plt.title('%i' % net.count)
-                        plt.savefig('images/%04d.png'%net.count)
-                        plt.show()
-
-
                     # get predicted target from vision
-                    net.imgs = resize_images(net.imgs, res=res, rows=None, show_resized_image=False, flatten=True).squeeze()
-
-                    # net.imgs = {
-                    #     vision_input: net.imgs.reshape(
-                    #         (1, 1, subpixels))
-                    # }
+                    net.imgs = resize_images(net.raw_img, res=res, rows=None, show_resized_image=False, flatten=True).squeeze()
 
                 return net.imgs
 
@@ -370,6 +340,33 @@ def demo(backend='cpu'):
             #TODO change this to index into an array
             output_signal = np.hstack((output_signal, rendered_image))
 
+            # save relevant data
+            if generate_training_data:
+                print('Target Count: %i/%i ' % (int(net.count/render_frequency), n_targets))
+                save_data={
+                        'rgb': net.raw_img,
+                        # 'rgb': rendered_image.reshape(
+                        #     [res[0], res[1], 3]),
+                        'target': local_target,
+                    }
+
+                dat.save(
+                    data=save_data,
+                    save_location='%s/data/%04d' % (test_name, net.count),
+                    overwrite=True)
+
+
+                # save figure
+                if save_rendered_fig:
+                    if not os.path.exists('images'):
+                        os.makedirs('images')
+                    plt.Figure()
+                    plt.imshow(rendered_image.reshape([res[0], res[1], 3]), origin='lower')
+                    plt.title('%i' % net.count)
+                    plt.savefig('images/%04d.png'%net.count)
+                    # plt.show()
+                    plt.close()
+
             # print("MAIN SIM COUNT: ", net.count)
             if viewer.exit or net.count == sim_length:
                 if track_results:
@@ -389,8 +386,11 @@ def demo(backend='cpu'):
                 net.target_count += 1
                 # phis = [-1.45, 0.4, 1.1]
                 # radii = [1.2, 0.8, 2.6]
-                phis = np.linspace(-3.14, 3.14, 200)
-                radii = np.linspace(0.8, 3.4, 200)
+                phis = np.linspace(-3.14, 3.14, 100)
+                phis = np.tile(phis, 10)
+                # radii = np.linspace(0.8, 3.4, 200)
+                radii = np.linspace(0.5, 3.5, 1000)
+                # radii = np.repeat(radii, 100)
                 # phi = np.random.uniform(low=angle_limit[0], high=angle_limit[1])
                 # radius = np.random.uniform(low=dist_limit[0], high=dist_limit[1])
                 phi = phis[net.target_count]
@@ -416,7 +416,9 @@ def demo(backend='cpu'):
                 prediction_track.append(prediction)
                 target_track.append(local_target)
 
+
             return output_signal
+
 
         def steering_function(x):
             body_com_vely = x[0]

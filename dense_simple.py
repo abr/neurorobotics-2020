@@ -12,6 +12,8 @@ import time
 from abr_analyze import DataHandler
 import tensorflow as tf
 import math
+
+warnings.simplefilter("ignore")
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
     try:
@@ -65,13 +67,14 @@ def preprocess_data(
             plt.show()
 
         # scan the image for red pixels to determine target angle
+        # print(np.array(local_error).shape)
         angle = math.atan2(local_error[count][1], local_error[count][0])
 
         # scaled_target_data.append(angle)
 
         # if debug is on, show plots of the scaled image, predicted target
         # location, and target angle output
-        if debug and count%100 == 0:
+        if debug and count%10 == 0:
             plt.figure()
             plt.subplot(311)
             # scaled image
@@ -119,11 +122,11 @@ def load_data(
     # load training images
     training_images = []
     training_targets = []
-    for nn in range(0, n_imgs):
-        data = dat.load(parameters=['rgb', 'local_error'], save_location='%s/data/%04d' % (label, nn))
+    for nn in range(1, n_imgs+1):
+        data = dat.load(parameters=['rgb', 'target'], save_location='%s/data/%04d' % (label, nn))
         # for ii in range(n_steps):
         training_images.append(data['rgb'])
-        training_targets.append(data['local_error'])
+        training_targets.append(data['target'])
 
     # scale image resolution
     # training_images, training_targets = preprocess_data(
@@ -145,41 +148,50 @@ def load_data(
     return training_images, training_targets
 
 # ------------------------------ DEFINE PARAMETERS
-# backend = 'nengo_loihi'
-backend = 'nengo_dl'
-# backend = 'nengo'
-warnings.simplefilter("ignore")
-db_name = 'rover_training_0004'
-spiking = True
+# db_name = 'rover_training_0004'
+db_name = 'circular_targets'
 save_db_name = '%s_results' % db_name
-# train or just validate
-train_on_data = True
-if spiking:
-    train_on_data = False
-# load params from previous epoch
-load_net_params = True
-# save net params only if training
-save_net_params = train_on_data
+
+params_file = 'minimizing_filters'
+save_name = 'filters_32'
+save_folder = 'data/%s/%s/%s' % (db_name, params_file, save_name)
+pretrained_weights = 'data/rover_training_0004/minimizing_filters/filters_32/minimizing_filters_29'
+
 # show plots for processed data
 debug = False
 # show the images before and after scaling
 show_resized_image = debug
-# range of epochs
-epochs = [29, 30]
-if not spiking:
+
+spiking = True
+load_net_params = True
+if pretrained_weights is not None:
+    # don't use auto weight loading, use the specified file
+    load_net_params = False
+
+if spiking:
+    # backend = 'nengo_loihi'
+    backend = 'nengo_dl'
+    train_on_data = False
+    # n_steps = 500
+    n_steps = 300
+    gain_scale = 200
+    synapses = 0.05
+else:
+    backend = 'nengo_dl'
+    train_on_data = False
     n_steps = 1
     gain_scale = 1
     synapses = None
-else:
-    n_steps = 500
-    gain_scale = 200
-    save_net_params = False
-    synapses = 0.05
+
+# save net params only if training
+save_net_params = train_on_data
+
 # training batch size
+epochs = [29, 30]
 n_training = 30000
-minibatch_size = 1
+minibatch_size = 100
 # validation batch size
-n_validation = 100
+n_validation = 10
 minibatch_size = min(minibatch_size, n_validation)
 output_dims = 2
 gain = 1
@@ -192,16 +204,15 @@ seed = 0
 np.random.seed(seed)
 flatten = True
 
-# save_name = 'learning_xy_optimized_1_conv_with_relu_spiking'
-save_name = 'filters_64'
-params_file = 'saved_net_%ix%i' % (res[0], res[1])
-save_folder = 'data/%s/keras/%s/%s' % (db_name, params_file, save_name)
+# if backend is not 'nengo_loihi':
+#     pretrained_weights = None
 
 if not os.path.exists(save_folder):
     os.makedirs(save_folder)
 
 notes = (
 '''
+\n- checking performance with 32 filters
 \n- bias off on all layer, loihi restriction
 \n- default kernel initializers
 \n- 1 conv layers 1 dense
@@ -230,8 +241,10 @@ if train_on_data:
         debug=debug, show_resized_image=show_resized_image, db_name=db_name,
         flatten=flatten, n_steps=n_steps)
 
+valid_label = 'validation_0000'
+
 validation_images, validation_targets = load_data(
-    res=res, label='validation_0000', n_imgs=n_validation,
+    res=res, label=valid_label, n_imgs=n_validation,
     debug=debug, show_resized_image=show_resized_image, db_name=db_name,
     flatten=flatten, n_steps=n_steps)
 
@@ -253,7 +266,7 @@ relu_layer = tf.keras.layers.Activation(tf.nn.relu)
 relu_out = relu_layer(image_input)
 
 conv1 = tf.keras.layers.Conv2D(
-    filters=64,
+    filters=32,
     kernel_size=3,
     strides=1,
     use_bias=False,
@@ -299,6 +312,9 @@ nengo_relu.ensemble.gain = nengo.dists.Choice([gain * gain_scale])
 print('MAX RATES: ',nengo_conv.ensemble)
 
 net = converter.net
+with net:
+    conv_neuron_probe = nengo.Probe(nengo_conv.ensemble.neurons)
+
 for cc, conn in enumerate(net.all_connections):
     # conn.synapse = None
     # print(conn)
@@ -311,18 +327,27 @@ if backend is not 'nengo_dl':
     net.validation_images = validation_images
     def send_image_in(t):
         img = net.validation_images[net.count]
-        print('count: ', net.count)
-        print('img shape: ', img.shape)
+        # print('count: ', net.count)
+        # print('img shape: ', img.shape)
         net.count += 1
         return img
 
     with net:
+        nengo_loihi.add_params(net)
         image_input_node = nengo.Node(send_image_in, size_out=subpixels)
         nengo.Connection(image_input_node, vision_input, synapse=None)
         prediction_probe = nengo.Probe(output_layer, synapse=None)
-        # nengo_loihi.add_params(net)
+        n_conv_neurons =  nengo_conv.ensemble.n_neurons
+        print('Convolutional neurons: ', n_conv_neurons)
+        # net.config[nengo_conv.ensemble].block_shape = nengo_loihi.BlockShape(
+        #     (1024,), (n_conv_neurons,))
         # net.config[image_input_node].on_chip = False
 
+
+if pretrained_weights is not None:
+    with nengo_dl.Simulator(net, minibatch_size=minibatch_size, seed=seed) as sim:
+        sim.load_params(pretrained_weights)
+        sim.freeze_params(net)
 
 if backend == 'nengo_loihi':
     sim = nengo_loihi.Simulator(net, target='sim')
@@ -334,9 +359,11 @@ elif backend == 'nengo':
 
 with sim:
     def plot_predict(
-            predictions, target_vals,
+            prediction_data, target_vals,
             save_folder='', save_name='prediction_results', num_pts=100):
 
+        predictions = prediction_data[output_probe]
+        predictions = np.asarray(predictions).squeeze()
         print('targets shape: ', target_vals.shape)
         print('prediction shape: ', predictions.shape)
 
@@ -354,15 +381,52 @@ with sim:
 
 
         fig = plt.Figure()
-        plt.subplot(211)
+        plt.subplot(221)
         plt.title('X: %.3f' % x_err)
-        plt.plot(predictions[-num_pts:, 0], label='predictions', color='k', linestyle='--')
-        plt.plot(target_vals[-num_pts:, 0], label='target', color='r')
-        plt.subplot(212)
-        plt.title('Y: %.3f' % y_err)
-        plt.plot(predictions[-num_pts:, 1], label='predictions', color='k', linestyle='--')
-        plt.plot(target_vals[-num_pts:, 1], label='target', color='r')
+        # x = np.linspace(0.5, 3.5, len(predictions[-num_pts:]))
+        x = np.linspace(0, len(predictions[-num_pts:]), len(predictions[-num_pts:]))
+        plt.plot(x, predictions[-num_pts:, 0], label='predictions', color='k', linestyle='--')
+        plt.plot(x, target_vals[-num_pts:, 0], label='target', color='r')
         plt.legend()
+        plt.subplot(222)
+        plt.title('Y: %.3f' % y_err)
+        plt.plot(x, predictions[-num_pts:, 1], label='predictions', color='k', linestyle='--')
+        plt.plot(x, target_vals[-num_pts:, 1], label='target', color='r')
+        plt.legend()
+        plt.subplot(223)
+        plt.title('Target XY')
+        plt.xlim([-3, 3])
+        plt.ylim([-3, 3])
+        plt.scatter(0, 0, color='r', label='rover', s=2)
+        plt.scatter(
+            target_vals[-num_pts:, 0],
+            target_vals[-num_pts:, 1], label='target', s=1)
+        plt.legend()
+        plt.subplot(224)
+        activity = np.array(prediction_data[conv_neuron_probe])
+        shape = activity.shape
+        print('activity shape: ', shape)
+        activity = activity.reshape(shape[0]*shape[1], shape[2])
+        print('reshaped activity: ', activity.shape)
+        activity_over_time = np.sum(activity, axis=0)
+        print('if I did this right %i should match' % (shape[2]), activity_over_time.shape)
+        zero_count = 0
+        non_zero_neurons = []
+        for index, neuron in enumerate(activity_over_time):
+            if neuron == 0:
+                zero_count += 1
+            else:
+                non_zero_neurons.append(index)
+        non_zero_activity = [activity[:, i] for i in non_zero_neurons]
+        # keep time/batch_size as our first dimension
+        non_zero_activity = np.asarray(non_zero_activity).T
+        print('%i neurons never fire' % zero_count)
+        print('%i neurons fire' % np.array(non_zero_activity).shape[1])
+        print('non zero activity shape: ', non_zero_activity.shape)
+        neurons_to_plot = 10
+        # plt.plot(activity[-num_pts:, :neurons_to_plot])
+        plt.plot(non_zero_activity[-num_pts:, :neurons_to_plot])
+        plt.tight_layout()
         plt.savefig('%s/%s.png' % (save_folder, save_name))
         print('saving figure to %s/%s' % (save_folder, save_name))
         # plt.show()
@@ -381,10 +445,10 @@ with sim:
 
             final_errors = np.asarray(final_errors)
             plt.figure()
-            plt.subplot(211)
+            plt.subplot(311)
             plt.title('X error over epochs')
             plt.plot(final_errors[:, 0])
-            plt.subplot(212)
+            plt.subplot(312)
             plt.title('Y error over epochs')
             plt.plot(final_errors[:, 1])
             plt.savefig('%s/final_epoch_error.png' % (save_folder))
@@ -439,6 +503,7 @@ with sim:
         for epoch in range(epochs[0], epochs[1]):
             num_imgs_to_show = 10
             num_pts = num_imgs_to_show*n_steps #3*int(max(n_steps, min(n_validation, 100)))
+            # num_pts=100
             print('\n\nEPOCH %i\n' % epoch)
             if load_net_params and epoch>0:
                 prev_params_loc = ('%s/%s_%i' % (save_folder, params_file, epoch-1))
@@ -471,11 +536,9 @@ with sim:
 
             print('input shape: ', validation_images_dict[vision_input].shape)
             data = sim.predict(validation_images_dict, n_steps=n_steps, stateful=False)
-            predictions = data[output_probe]
-            predictions = np.asarray(predictions).squeeze()
 
             plot_predict(
-                    predictions=predictions, target_vals=validation_targets,
+                    prediction_data=data, target_vals=validation_targets,
                     save_folder=save_folder, save_name=save_name,
                     num_pts=num_pts)
 
