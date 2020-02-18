@@ -12,6 +12,7 @@ import time
 from abr_analyze import DataHandler
 import tensorflow as tf
 import math
+from nengo.utils.matplotlib import rasterplot
 
 warnings.simplefilter("ignore")
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -122,7 +123,7 @@ def load_data(
     # load training images
     training_images = []
     training_targets = []
-    for nn in range(1, n_imgs+1):
+    for nn in range(0, n_imgs):
         data = dat.load(parameters=['rgb', 'target'], save_location='%s/data/%04d' % (label, nn))
         # for ii in range(n_steps):
         training_images.append(data['rgb'])
@@ -148,21 +149,24 @@ def load_data(
     return training_images, training_targets
 
 # ------------------------------ DEFINE PARAMETERS
-# db_name = 'rover_training_0004'
-db_name = 'circular_targets'
+db_name = 'rover_training_0004'
+# db_name = 'circular_targets'
 save_db_name = '%s_results' % db_name
 
-params_file = 'minimizing_filters'
+# params_file = 'minimizing_filters'
+params_file = 'spiking_conversion'
 save_name = 'filters_32'
 save_folder = 'data/%s/%s/%s' % (db_name, params_file, save_name)
-pretrained_weights = 'data/rover_training_0004/minimizing_filters/filters_32/minimizing_filters_29'
+# pretrained_weights = 'data/rover_training_0004/minimizing_filters/filters_32/minimizing_filters_29'
+pretrained_weights = 'data/rover_training_0004/spiking_conversion/filters_32/spiking_conversion_14'
+# pretrained_weights = None
 
 # show plots for processed data
 debug = False
 # show the images before and after scaling
 show_resized_image = debug
 
-spiking = True
+spiking = False
 load_net_params = True
 if pretrained_weights is not None:
     # don't use auto weight loading, use the specified file
@@ -174,24 +178,26 @@ if spiking:
     train_on_data = False
     # n_steps = 500
     n_steps = 300
-    gain_scale = 200
-    synapses = 0.05
+    gain_scale = 500
+    synapses = [None, None, 0.05]
 else:
     backend = 'nengo_dl'
     train_on_data = False
     n_steps = 1
     gain_scale = 1
-    synapses = None
+    synapses = [None, None, None]
 
+print('using %s backend' % backend)
 # save net params only if training
 save_net_params = train_on_data
 
 # training batch size
-epochs = [29, 30]
+epochs = [15, 16]
 n_training = 30000
 minibatch_size = 100
 # validation batch size
-n_validation = 10
+n_validation = 1000
+num_imgs_to_show = 10
 minibatch_size = min(minibatch_size, n_validation)
 output_dims = 2
 gain = 1
@@ -241,7 +247,8 @@ if train_on_data:
         debug=debug, show_resized_image=show_resized_image, db_name=db_name,
         flatten=flatten, n_steps=n_steps)
 
-valid_label = 'validation_0000'
+# valid_label = 'validation_0000'
+valid_label = 'training_0000'
 
 validation_images, validation_targets = load_data(
     res=res, label=valid_label, n_imgs=n_validation,
@@ -314,17 +321,23 @@ print('MAX RATES: ',nengo_conv.ensemble)
 net = converter.net
 with net:
     conv_neuron_probe = nengo.Probe(nengo_conv.ensemble.neurons)
+    # relu_neuron_probe = nengo.Probe(nengo_relu.ensemble.neurons)
 
 for cc, conn in enumerate(net.all_connections):
-    # conn.synapse = None
-    # print(conn)
-    # if cc == 2:
-    #     print('setting synapse')
-    conn.synapse = synapses
+    conn.synapse = synapses[cc]
+    print('Setting synapse to %s on ' % str(synapses[cc]), conn)
+    # if str(conn) == '<Connection from <Node "input_1"> to <Neurons of <Ensemble "activation.0">>>':
+    #     print('setting None synapse on: ', conn)
+    #     conn.synapse = None
+    # else:
+    #     print('setting %.3f synapse on ' % synapses, conn)
+    #     conn.synapse = synapses
 
 if backend is not 'nengo_dl':
     net.count = 0
-    net.validation_images = validation_images
+    shape = validation_images.shape
+    net.validation_images = validation_images.reshape(shape[0]*shape[1], shape[2])
+    print('Running loihi sim with images shape: ', net.validation_images.shape)
     def send_image_in(t):
         img = net.validation_images[net.count]
         # print('count: ', net.count)
@@ -339,13 +352,19 @@ if backend is not 'nengo_dl':
         prediction_probe = nengo.Probe(output_layer, synapse=None)
         n_conv_neurons =  nengo_conv.ensemble.n_neurons
         print('Convolutional neurons: ', n_conv_neurons)
-        # net.config[nengo_conv.ensemble].block_shape = nengo_loihi.BlockShape(
-        #     (1024,), (n_conv_neurons,))
+        for cc, conn in enumerate(net.all_connections):
+            if cc == 1:
+                print('setting pop_type 16 on conn: ', conn)
+                net.config[conn].pop_type = 16
+
+        net.config[nengo_conv.ensemble].block_shape = nengo_loihi.BlockShape(
+            (800,), (n_conv_neurons,))
         # net.config[image_input_node].on_chip = False
 
 
 if pretrained_weights is not None:
     with nengo_dl.Simulator(net, minibatch_size=minibatch_size, seed=seed) as sim:
+        print('Received specific weights to use: ', pretrained_weights)
         sim.load_params(pretrained_weights)
         sim.freeze_params(net)
 
@@ -364,6 +383,7 @@ with sim:
 
         predictions = prediction_data[output_probe]
         predictions = np.asarray(predictions).squeeze()
+        print('plotting %i timesteps' % num_pts)
         print('targets shape: ', target_vals.shape)
         print('prediction shape: ', predictions.shape)
 
@@ -402,8 +422,9 @@ with sim:
             target_vals[-num_pts:, 0],
             target_vals[-num_pts:, 1], label='target', s=1)
         plt.legend()
-        plt.subplot(224)
+        a4 = plt.subplot(224)
         activity = np.array(prediction_data[conv_neuron_probe])
+        # activity = np.array(prediction_data[relu_neuron_probe])
         shape = activity.shape
         print('activity shape: ', shape)
         activity = activity.reshape(shape[0]*shape[1], shape[2])
@@ -423,9 +444,14 @@ with sim:
         print('%i neurons never fire' % zero_count)
         print('%i neurons fire' % np.array(non_zero_activity).shape[1])
         print('non zero activity shape: ', non_zero_activity.shape)
-        neurons_to_plot = 10
+        neurons_to_plot = 100
+        neuron_step = int(non_zero_activity.shape[1]/neurons_to_plot)
+        print('choosing every %i neuron' % neuron_step)
         # plt.plot(activity[-num_pts:, :neurons_to_plot])
-        plt.plot(non_zero_activity[-num_pts:, :neurons_to_plot])
+        # plt.plot(non_zero_activity[-num_pts:, ::neuron_step])
+        activity_to_plot =  non_zero_activity[-num_pts:, ::neuron_step]
+        t = np.arange(0, num_pts, 1)
+        rasterplot(t, activity_to_plot)
         plt.tight_layout()
         plt.savefig('%s/%s.png' % (save_folder, save_name))
         print('saving figure to %s/%s' % (save_folder, save_name))
@@ -465,11 +491,14 @@ with sim:
             overwrite=True)
 
     if backend == 'nengo_loihi':
-        sim.run(0.001*n_steps)
+        print('Starting loihi sim...')
+        sim.run(0.001*n_steps*n_validation)
         predictions = sim.data[prediction_probe]
-        target_vals = validation_targets[:n_steps]
+        np.savez_compressed('predictions2', predictions)
+        #TODO should this be steps*n_val?
+        target_vals = validation_targets[:n_steps*n_validation]
         plot_predict(
-                predictions=predictions, target_vals=target_vals,
+                prediction_data=predictions, target_vals=target_vals,
                 save_folder=save_folder, save_name='loihi_inferece',
                 num_pts=n_steps)
 
@@ -501,7 +530,6 @@ with sim:
             epochs = [0, epochs]
 
         for epoch in range(epochs[0], epochs[1]):
-            num_imgs_to_show = 10
             num_pts = num_imgs_to_show*n_steps #3*int(max(n_steps, min(n_validation, 100)))
             # num_pts=100
             print('\n\nEPOCH %i\n' % epoch)
@@ -511,7 +539,7 @@ with sim:
                 sim.load_params(prev_params_loc)
 
             if train_on_data:
-                print('Training...')
+                print('Training in nengo-dl...')
                 sim.fit(training_images_dict, training_targets_dict, epochs=1)
 
             # save parameters back into net
@@ -531,11 +559,15 @@ with sim:
                 else:
                     prefix = ''
                 # we're running inference using the previous weights
-                save_name='%sinference_epoch%i' % (prefix, epoch)
+                save_name='%sinference_epoch%i' % (prefix, epoch-1)
 
 
             print('input shape: ', validation_images_dict[vision_input].shape)
+            print('Running Prediction in nengo-dl')
             data = sim.predict(validation_images_dict, n_steps=n_steps, stateful=False)
+            predictions = data[output_probe]
+            predictions = np.asarray(predictions).squeeze()
+            np.savez_compressed('dl_predictions', predictions, validation_images_dict)
 
             plot_predict(
                     prediction_data=data, target_vals=validation_targets,
