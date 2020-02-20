@@ -181,8 +181,8 @@ if pretrained_weights is not None:
 
 if spiking:
     # backend = 'nengo_loihi'
-    backend = 'nengo_dl'
-    # backend = 'nengo'
+    # backend = 'nengo_dl'
+    backend = 'nengo'
     train_on_data = False
     # n_steps = 500
     n_steps = 300
@@ -348,27 +348,33 @@ for cc, conn in enumerate(net.all_connections):
     conn.synapse = synapses[cc]
     print('Setting synapse to %s on ' % str(synapses[cc]), conn)
 
+
+validation_images_dict = {
+    vision_input: validation_images.reshape(
+        (n_validation, n_steps, subpixels))
+}
+
+
+# if not using nengo dl we have to use a sim.run function
+# create a node so we can inject data into the network
 if backend is not 'nengo_dl':
     net.count = 0
-    shape = validation_images.shape
-    net.validation_images = validation_images.reshape(shape[0]*shape[1], shape[2])
-    print('Image input node has image array of shape ', net.validation_images.shape)
+    net.validation_images = validation_images_dict[vision_input].reshape(
+        n_validation*n_steps, subpixels)
     print('Running loihi sim with images shape: ', net.validation_images.shape)
+    # our input node function
     def send_image_in(t):
         img = net.validation_images[net.count]
-        # print('count: ', net.count)
-        # print('img shape: ', img.shape)
         net.count += 1
         return img
 
     with net:
+        # create out input node
         image_input_node = nengo.Node(send_image_in, size_out=subpixels)
         nengo.Connection(image_input_node, vision_input, synapse=None)
-        # overwrite the output probe for non batched runs
-        # prediction_probe = nengo.Probe(output_layer, synapse=None)
-        output_probe = nengo.Probe(output_layer, synapse=synapses[3])
         n_conv_neurons =  nengo_conv.ensemble.n_neurons
         print('Convolutional neurons: ', n_conv_neurons)
+        # set some parameters to account for loihi limitations
         if backend == 'nengo_loihi':
             nengo_loihi.add_params(net)
             for cc, conn in enumerate(net.all_connections):
@@ -381,6 +387,7 @@ if backend is not 'nengo_dl':
             # net.config[image_input_node].on_chip = False
 
 
+# load a specific set of weights
 if pretrained_weights is not None:
     with nengo_dl.Simulator(net, minibatch_size=minibatch_size, seed=seed) as sim:
         print('Received specific weights to use: ', pretrained_weights)
@@ -424,8 +431,6 @@ with sim:
         plt.title('X: %.3f' % x_err)
         # x = np.linspace(0.5, 3.5, len(predictions[-num_pts:]))
         x = np.linspace(0, len(predictions[-num_pts:]), len(predictions[-num_pts:]))
-        print('x: ', x)
-        print('y: ', predictions[-num_pts:, 0])
         plt.plot(x, predictions[-num_pts:, 0], label='predictions', color='k', linestyle='--')
         plt.plot(x, target_vals[-num_pts:, 0], label='target', color='r')
         plt.legend()
@@ -443,13 +448,14 @@ with sim:
             target_vals[-num_pts:, 0],
             target_vals[-num_pts:, 1], label='target', s=1)
         plt.legend()
+
         a4 = plt.subplot(224)
         activity = np.array(prediction_data[conv_neuron_probe])
         # activity = np.array(prediction_data[relu_neuron_probe])
         shape = activity.shape
         print('activity shape: ', shape)
         if activity.ndim == 3:
-            activity = activity.reshape(shape[0]*shape[1], shape[2])
+            activity = activity.reshape(shape[0]*shape[1], shape[2], order='C')
         print('reshaped activity: ', activity.shape)
         activity_over_time = np.sum(activity, axis=0)
         print('if I did this right %i should match' % (shape[-1]), activity_over_time.shape)
@@ -467,12 +473,14 @@ with sim:
         print('%i neurons fire' % np.array(non_zero_activity).shape[1])
         print('non zero activity shape: ', non_zero_activity.shape)
         neurons_to_plot = 100
+        print('only plotting %i neurons out of %i' %(neurons_to_plot, non_zero_activity.shape[1]))
+        print('only showing the last %i timesteps out of %i' %(num_pts, non_zero_activity.shape[0]))
         neuron_step = int(non_zero_activity.shape[1]/neurons_to_plot)
         print('choosing every %i neuron' % neuron_step)
         # plt.plot(activity[-num_pts:, :neurons_to_plot])
         # plt.plot(non_zero_activity[-num_pts:, ::neuron_step])
         activity_to_plot =  non_zero_activity[-num_pts:, ::neuron_step]
-        print(activity_to_plot)
+        # print(activity_to_plot)
         t = np.arange(0, num_pts, 1)
         rasterplot(t, activity_to_plot)
         plt.tight_layout()
@@ -484,13 +492,40 @@ with sim:
 
         show_hist = True
         if show_hist:
-            plt.figure()
-            plt.title('ACTIVE: %i | INACTIVE: %i' % (np.array(non_zero_activity).shape[1], zero_count))
-            shape = activity_to_plot.shape
-            x = activity_to_plot.reshape(shape[0]*shape[1])
-            plt.hist(x, bins=40)
-            plt.savefig('%s/activity_%s.png' % (save_folder, save_name))
-            # plt.show()
+            if not spiking:
+                plt.figure()
+                plt.subplot(111)
+                plt.title('ACTIVE: %i | INACTIVE: %i' % (np.array(non_zero_activity).shape[1], zero_count))
+                shape = non_zero_activity.shape
+                x = non_zero_activity.reshape(shape[0]*shape[1])
+                plt.ylabel('Rate Neuron Outputs')
+                plt.hist(x, bins=40)
+                plt.legend()
+                plt.savefig('%s/activity_%s.png' % (save_folder, save_name))
+            else:
+                n_neuron_activities_to_plot = 10
+                for neuron in range(0, n_neuron_activities_to_plot):
+                    # x is activity for a single neuron over n steps for all images
+                    x = non_zero_activity[:, neuron]
+                    print('single neuron activity shape: ', x.shape)
+                    # reshape so we can separate by image
+                    x = x.reshape(num_imgs_to_show, n_steps)
+                    print('reshaped: ', x.shape)
+
+                    plt.figure(figsize=(10, 10))
+                    plt.title('Neuron %i Activity over %i steps' % (neuron, n_steps))
+                    for ii, x_img in enumerate(x):
+                        plt.subplot2grid((len(x), 4), (ii, 0), colspan=2, rowspan=1)
+                        # image ii, timestep 0 of n_steps, all subpixels
+                        plt.imshow(validation_images[ii, 0, :].reshape((res[0], res[1], 3)), origin='lower')
+                        plt.ylabel('Image %i' % ii)
+                        # plt.subplot(len(x), 1, ii+1)
+                        plt.subplot2grid((len(x), 4), (ii, 2), colspan=2, rowspan=1)
+                        # plt.plot(non_zero_activity[:, 0])
+                        plt.plot(x_img, label=ii)
+                    plt.tight_layout()
+                    plt.savefig('%s/%s_img_spikes_neuron%i_%s.png' % (save_folder, backend, neuron, save_name))
+                    # plt.show()
 
         if not spiking:
             #TODO: fix this because we keep appending, need to attach value to an epoch and overwrite
@@ -526,9 +561,7 @@ with sim:
     if backend == 'nengo_loihi' or backend == 'nengo':
         print('Starting %s sim...' % backend)
         sim.run(dt*n_steps*n_validation)
-        prediction_data = sim.data #[prediction_probe]
-        # np.savez_compressed('predictions2', predictions)
-        #TODO should this be steps*n_val?
+        prediction_data = sim.data
         target_vals = validation_targets[:n_steps*n_validation]
         num_pts = num_imgs_to_show*n_steps
         if spiking:
@@ -542,10 +575,10 @@ with sim:
                 num_pts=num_pts)
 
     elif backend == 'nengo_dl':
-        validation_images_dict = {
-            vision_input: validation_images.reshape(
-                (n_validation, n_steps, subpixels))
-        }
+        # validation_images_dict = {
+        #     vision_input: validation_images.reshape(
+        #         (n_validation, n_steps, subpixels))
+        # }
 
 
         if train_on_data:
@@ -597,7 +630,7 @@ with sim:
                 else:
                     prefix = ''
                 # we're running inference using the previous weights
-                save_name='%s%sinference_epoch%i' % (prefix, custom_save_tag, epoch-1)
+                save_name='%snengo-dl_%sinference_epoch%i' % (prefix, custom_save_tag, epoch-1)
 
 
             print('input shape: ', validation_images_dict[vision_input].shape)
@@ -611,9 +644,3 @@ with sim:
                     prediction_data=data, target_vals=validation_targets,
                     save_folder=save_folder, save_name=save_name,
                     num_pts=num_pts)
-
-        # NOTE this seems unnecessary to save
-        # dat_results.save(
-        #     data={'targets': validation_targets},
-        #     save_location=save_folder,
-        #     overwrite=True)
