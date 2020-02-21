@@ -147,7 +147,7 @@ if spiking:
     # backend = 'nengo'
     train_on_data = False
     n_steps = 300
-    gain_scale = 100
+    gain_scale = 200
     synapses = [None, None, None, 0.05]
 else:
     # backend = 'nengo_dl'
@@ -170,6 +170,8 @@ minibatch_size = 100
 # validation batch size
 n_validation = 10
 num_imgs_to_show = 10
+# number of steps to plot
+num_pts = num_imgs_to_show*n_steps
 minibatch_size = min(minibatch_size, n_validation)
 output_dims = 2
 gain = 1
@@ -533,72 +535,87 @@ with sim:
         print('Starting %s sim...' % backend)
         # match our sim length for nengo-dl
         sim.run(dt*n_steps*n_validation)
-        target_vals = validation_targets #[:n_steps*n_validation]
         # set how many timesteps to plot to see the results for the specified number of imgs
-        num_pts = num_imgs_to_show*n_steps
         if spiking:
             prefix = 'spiking_'
         else:
             prefix = ''
         save_name = '%s%s_%sinference_epoch%i' % (prefix, backend, custom_save_tag, epochs[0])
         plot_predict(
-                prediction_data=sim.data, target_vals=target_vals,
+                prediction_data=sim.data, target_vals=validation_targets,
                 save_folder=save_folder, save_name=save_name,
                 num_pts=num_pts)
 
     elif backend == 'nengo_dl':
         print('Starting nengo-dl sim...')
-        if train_on_data:
-            print('Training')
-            training_images_dict = {
-                vision_input: training_images.reshape(
-                    (n_training, n_steps, subpixels))
-            }
+        if spiking:
+            prefix = 'spiking_'
+        else:
+            prefix = ''
+        # we're running inference using the previous weights
+        save_name='%snengo-dl_%sinference_epoch%i' % (prefix, custom_save_tag, epochs[0])
 
-            training_targets_dict = {
-                output_probe: training_targets.reshape(
-                    (n_training, n_steps, output_dims))
-            }
+        print('Running Prediction in nengo-dl')
+        data = sim.predict(validation_images_dict, n_steps=n_steps, stateful=False)
 
-            sim.compile(
-                optimizer=tf.optimizers.RMSprop(0.001),
-                loss={output_probe: tf.losses.mse})
+        plot_predict(
+                prediction_data=data, target_vals=validation_targets,
+                save_folder=save_folder, save_name=save_name,
+                num_pts=num_pts)
 
-        for epoch in range(epochs[0], epochs[1]):
-            num_pts = num_imgs_to_show*n_steps
-            print('\nEPOCH %i' % epoch)
-            if load_net_params and epoch>0:
-                prev_params_loc = ('%s/%s_%i' % (save_folder, params_file, epoch-1))
-                print('loading pretrained network parameters from \n%s' % prev_params_loc)
-                sim.load_params(prev_params_loc)
 
-            if train_on_data:
-                print('fitting data...')
-                sim.fit(training_images_dict, training_targets_dict, epochs=1)
-
-            # save parameters back into net
-            sim.freeze_params(net)
-
-            if save_net_params:
-                current_params_loc = '%s/%s_%i' % (save_folder, params_file, epoch)
-                print('saving network parameters to %s' % current_params_loc)
-                sim.save_params(current_params_loc)
-
-            if train_on_data:
-                # we're predicting using the weights from this epoch
-                save_name='%sprediction_epoch%i' % (custom_save_tag, epoch)
-            else:
-                if spiking:
-                    prefix = 'spiking_'
-                else:
-                    prefix = ''
-                # we're running inference using the previous weights
-                save_name='%snengo-dl_%sinference_epoch%i' % (prefix, custom_save_tag, epoch-1)
-
-            print('Running Prediction in nengo-dl')
-            data = sim.predict(validation_images_dict, n_steps=n_steps, stateful=False)
-
-            plot_predict(
-                    prediction_data=data, target_vals=validation_targets,
-                    save_folder=save_folder, save_name=save_name,
-                    num_pts=num_pts)
+        # print('Starting nengo-dl sim...')
+        # if train_on_data:
+        #     print('Training')
+        #     training_images_dict = {
+        #         vision_input: training_images.reshape(
+        #             (n_training, n_steps, subpixels))
+        #     }
+        #
+        #     training_targets_dict = {
+        #         output_probe: training_targets.reshape(
+        #             (n_training, n_steps, output_dims))
+        #     }
+        #
+        #     sim.compile(
+        #         optimizer=tf.optimizers.RMSprop(0.001),
+        #         loss={output_probe: tf.losses.mse})
+        #
+        # for epoch in range(epochs[0], epochs[1]):
+        #     num_pts = num_imgs_to_show*n_steps
+        #     print('\nEPOCH %i' % epoch)
+        #     if load_net_params and epoch>0:
+        #         prev_params_loc = ('%s/%s_%i' % (save_folder, params_file, epoch-1))
+        #         print('loading pretrained network parameters from \n%s' % prev_params_loc)
+        #         sim.load_params(prev_params_loc)
+        #
+        #     if train_on_data:
+        #         print('fitting data...')
+        #         sim.fit(training_images_dict, training_targets_dict, epochs=1)
+        #
+        #     # save parameters back into net
+        #     sim.freeze_params(net)
+        #
+        #     if save_net_params:
+        #         current_params_loc = '%s/%s_%i' % (save_folder, params_file, epoch)
+        #         print('saving network parameters to %s' % current_params_loc)
+        #         sim.save_params(current_params_loc)
+        #
+        #     if train_on_data:
+        #         # we're predicting using the weights from this epoch
+        #         save_name='%sprediction_epoch%i' % (custom_save_tag, epoch)
+        #     else:
+        #         if spiking:
+        #             prefix = 'spiking_'
+        #         else:
+        #             prefix = ''
+        #         # we're running inference using the previous weights
+        #         save_name='%snengo-dl_%sinference_epoch%i' % (prefix, custom_save_tag, epoch-1)
+        #
+        #     print('Running Prediction in nengo-dl')
+        #     data = sim.predict(validation_images_dict, n_steps=n_steps, stateful=False)
+        #
+        #     plot_predict(
+        #             prediction_data=data, target_vals=validation_targets,
+        #             save_folder=save_folder, save_name=save_name,
+        #             num_pts=num_pts)
