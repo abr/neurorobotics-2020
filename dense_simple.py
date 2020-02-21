@@ -111,8 +111,15 @@ def load_data(
 
     print('images pre_tile: ', training_images.shape)
     print('targets pre_tile: ', training_targets.shape)
-    training_images = np.tile(training_images[:, None, :], (1, n_steps, 1))
-    training_targets = np.tile(training_targets[:, None, :], (1, n_steps, 1))
+    # batch our images
+    # training_images = np.tile(training_images[:, None, :], (1, n_steps, 1))
+    # training_targets = np.tile(training_targets[:, None, :], (1, n_steps, 1))
+
+    # run like nengo sim.run without batching
+    training_images = np.repeat(training_images, n_steps, 0)
+    training_targets = np.repeat(training_targets, n_steps, 0)
+    training_images = training_images[np.newaxis, :]
+    training_targets = training_targets[np.newaxis, :]
     print('images post_tile: ', training_images.shape)
     print('targets post_tile: ', training_targets.shape)
 
@@ -147,7 +154,7 @@ if spiking:
     # backend = 'nengo'
     train_on_data = False
     n_steps = 300
-    gain_scale = 200
+    gain_scale = 100
     synapses = [None, None, None, 0.05]
 else:
     # backend = 'nengo_dl'
@@ -166,10 +173,11 @@ custom_save_tag = 'gain_scale_%i_' % gain_scale
 # training batch size
 epochs = [23, 24]
 n_training = 30000
-minibatch_size = 100
+minibatch_size = 1
 # validation batch size
 n_validation = 10
 num_imgs_to_show = 10
+num_imgs_to_show = min(num_imgs_to_show, n_validation)
 # number of steps to plot
 num_pts = num_imgs_to_show*n_steps
 minibatch_size = min(minibatch_size, n_validation)
@@ -226,6 +234,10 @@ validation_images, validation_targets = load_data(
     show_resized_image=show_resized_image, db_name=db_name,
     flatten=flatten, n_steps=n_steps)
 
+# for ii in range(100):
+#     plt.figure()
+#     plt.imshow(validation_images[:, ii, :].reshape((res[0], res[1], 3)))
+#     plt.show()
 test_print = ('Running tests for %s' % save_folder)
 print('\n')
 print('-'*len(test_print))
@@ -310,9 +322,14 @@ print('Setting synapse to %s on output probe' % str(synapses[3]))
 
 # create our validation image dict here as we want to use it for our
 # non batched runs input node
+# np.savez('images', validation_images)
+# np.savez('targets', validation_targets)
+# validation_images = np.ones((10, 300, 12288)) * np.random.RandomState(0).uniform(
+#     0, 1, size=(10, 1, 12288)
+# )
 validation_images_dict = {
     vision_input: validation_images.reshape(
-        (n_validation, n_steps, subpixels))
+        (1, n_validation*n_steps, subpixels))
 }
 
 # if not using nengo dl we have to use a sim.run function
@@ -331,6 +348,7 @@ if backend is not 'nengo_dl':
     with net:
         # create out input node
         image_input_node = nengo.Node(send_image_in, size_out=subpixels)
+        input_probe = nengo.Probe(image_input_node)
         nengo.Connection(image_input_node, vision_input, synapse=None)
         n_conv_neurons =  nengo_conv.ensemble.n_neurons
         print('Num neurons in convolutional layer: ', n_conv_neurons)
@@ -454,6 +472,8 @@ with sim:
         print('choosing every %i neuron' % neuron_step)
         activity_to_plot =  non_zero_activity[-num_pts:, ::neuron_step]
         t = np.arange(0, num_pts, 1)
+        print('t: ', t.shape)
+        print('act: ', activity_to_plot.shape)
         rasterplot(t, activity_to_plot)
         plt.tight_layout()
         plt.savefig('%s/%s.png' % (save_folder, save_name))
@@ -461,6 +481,12 @@ with sim:
         plt.close()
 
         # plots neural activity of individual neurons over n_steps for each image, next to the input image
+        # plt.figure()
+        # cnt = 10
+        # for ii in range(cnt):
+        #     plt.subplot(cnt,1,ii+1)
+        #     plt.plot(prediction_data[conv_neuron_probe][ii, :, 1554])
+        # plt.show()
         show_hist = True
         if show_hist:
             if not spiking:
@@ -476,6 +502,8 @@ with sim:
             else:
                 n_neuron_activities_to_plot = 10
                 for neuron in range(0, n_neuron_activities_to_plot):
+                    # neuron = np.random.randint(0, non_zero_activity.shape[1])
+                    # neuron = [87, 88, 89 , 90, 91, 92, 93, 94, 95, 96, 97, 98][neurons]
                     # x is activity for a single neuron over n steps for all images
                     x = non_zero_activity[:, neuron]
                     print('single neuron activity shape: ', x.shape)
@@ -486,10 +514,14 @@ with sim:
                     plt.figure(figsize=(10, 10))
                     plt.title('Neuron %i Activity over %i steps' % (neuron, n_steps))
                     for ii, x_img in enumerate(x):
+                        # plt.subplot2grid((len(x), 6), (ii, 0), colspan=2, rowspan=1)
+                        # plt.imshow(prediction_data[input_probe][int(ii), :].reshape((res[0], res[1], 3)), origin='lower')
+                        # plt.title('Probed Input %i' % int(ii))
                         plt.subplot2grid((len(x), 4), (ii, 0), colspan=2, rowspan=1)
                         # image ii, timestep 0 of n_steps, all subpixels
-                        plt.imshow(validation_images[ii, 0, :].reshape((res[0], res[1], 3)), origin='lower')
-                        plt.ylabel('Image %i' % ii)
+                        # plt.imshow(validation_images[ii, 0, :].reshape((res[0], res[1], 3)), origin='lower')
+                        plt.imshow(validation_images[:, ii*n_steps, :].reshape((res[0], res[1], 3)), origin='lower')
+                        plt.title('Image %i' % ii)
                         # plt.subplot(len(x), 1, ii+1)
                         plt.subplot2grid((len(x), 4), (ii, 2), colspan=2, rowspan=1)
                         # plt.plot(non_zero_activity[:, 0])
@@ -556,7 +588,7 @@ with sim:
         save_name='%snengo-dl_%sinference_epoch%i' % (prefix, custom_save_tag, epochs[0])
 
         print('Running Prediction in nengo-dl')
-        data = sim.predict(validation_images_dict, n_steps=n_steps, stateful=False)
+        data = sim.predict(validation_images_dict, n_steps=n_steps*n_validation, stateful=False)
 
         plot_predict(
                 prediction_data=data, target_vals=validation_targets,
