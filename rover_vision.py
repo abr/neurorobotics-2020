@@ -1,259 +1,413 @@
 import nengo
-import keras
 import nengo_dl
 import nengo_loihi
-import numpy as np
+import keras
 import cv2
 import warnings
-import tensorflow as tf
-import matplotlib.pyplot as plt
 import os
-import time
-from abr_analyze import DataHandler
+import dl_utils
 import tensorflow as tf
-import math
+import numpy as np
+import matplotlib.pyplot as plt
+from abr_analyze import DataHandler
+from nengo.utils.matplotlib import rasterplot
 
 
+# =================== Tensorflow settings to avoid OOM errors =================
 warnings.simplefilter("ignore")
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        # Currently, memory growth needs to be the same across GPUs
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+    except RuntimeError as e:
+        # Memory growth must be set before GPUs have been initialized
+        print(e)
+# =============================================================================
 
 class RoverVision():
-    """
-    Parameters
-    ----------
-    n_training: int, Optional (Default: 10000)
-        batch size for training data set
-    n_validation: int, Optional (Default: 1000)
-        batch size for validation data set
-    seed: int, Optional (Default: 0)
-        rng seed
-    n_neurons: int, Optional (Default: 1000)
-        number of neurons
-    minibatch_size: int, Optional (Default: 100)
-        size to break the batch up into
-    n_steps: int, Optional (Default: 1)
-        number of steps to run sim for, for training
-        it is better to set it to 1 and change the
-        batch size (n_training, n_validation) to be
-        the number of images to train
-    res: list of two ints
-        resolution to scale the image to before flattening
-        if no scaling then pass in the data image resolution
-    """
     def __init__(
-        self, res, minibatch_size=100, weights=None, filters=None, kernel_size=None, strides=None, seed=0):
+            self, res, minibatch_size, spiking, dt,
+            gain, gain_scale, seed, synapses):
 
-        self.minibatch_size = minibatch_size
+        self.dt = dt
         self.seed = seed
+        self.subpixels = res[0] * res[1] * 3
+        self.spiking = spiking
+        self.minibatch_size = minibatch_size
 
-        if filters is None:
-            filters = [32, 64, 128]
+        # Define our keras network
+        keras_image_input = tf.keras.Input(shape=(res[0], res[1], 3), batch_size=self.minibatch_size)
 
-        if kernel_size is None:
-            kernel_size = [3, 3, 3]
-
-        if strides is None:
-            strides = [1, 1, 1]
-
-        warnings.simplefilter("ignore")
-
-        image_input = tf.keras.Input(shape=(res[0], res[1], 3), batch_size=self.minibatch_size)
+        relu_layer = tf.keras.layers.Activation(tf.nn.relu)
+        relu_out = relu_layer(keras_image_input)
 
         conv1 = tf.keras.layers.Conv2D(
-            filters=filters[0],
-            kernel_size=kernel_size[0],
-            strides=strides[0],
-            use_bias=True,
+            filters=32,
+            kernel_size=3,
+            strides=1,
+            use_bias=False,
             activation=tf.nn.relu,
-            data_format="channels_last",
-            )(image_input)
+            data_format="channels_last"
+            )
+        conv1_out = conv1(relu_out)
 
-        conv2 = tf.keras.layers.Conv2D(
-            filters=filters[1],
-            kernel_size=kernel_size[1],
-            strides=strides[1],
-            use_bias=True,
-            activation=tf.nn.relu,
-            data_format="channels_last",
-            )(conv1)
+        flatten = tf.keras.layers.Flatten()(conv1_out)
 
-        conv3 = tf.keras.layers.Conv2D(
-            filters=filters[2],
-            kernel_size=kernel_size[2],
-            strides=strides[2],
-            use_bias=True,
-            activation=tf.nn.relu,
-            data_format="channels_last",
-            )(conv2)
-
-        flatten = tf.keras.layers.Flatten()(conv3)
-
-        output_probe = tf.keras.layers.Dense(
+        keras_dense = tf.keras.layers.Dense(
             units=2,
-            )(flatten)
+            use_bias=False
+            )
+        keras_dense_output = keras_dense(flatten)
 
-        model = tf.keras.Model(inputs=image_input, outputs=output_probe)
+        model = tf.keras.Model(inputs=keras_image_input, outputs=keras_dense_output)
 
-        # converter = nengo_dl.Converter(model)
-        converter = nengo_dl.Converter(model, swap_activations={tf.nn.relu: nengo.SpikingRectifiedLinear()})
-        # self.image_input = converter.inputs[image_input]
-        # self.output_probe = converter.outputs[output_probe]
+        # convert model to nengo and set neuron type
+        if not self.spiking:
+            converter = nengo_dl.Converter(
+                model,
+                #TODO: make sure swapping the activation here doesn't affect results
+                swap_activations={
+                    tf.nn.relu: nengo.RectifiedLinear(amplitude=1/gain_scale)
+                    }
+                )
+        else:
+            converter = nengo_dl.Converter(
+                model,
+                swap_activations={
+                    tf.nn.relu: nengo.SpikingRectifiedLinear(amplitude=1/gain_scale)
+                    }
+            )
+
+        # create references to some nengo objects in the network
+        # IO objects
+        self.vision_input = converter.inputs[keras_image_input]
+        self.dense_output = converter.outputs[keras_dense_output]
+
+        # ensemble objects
+        nengo_conv = converter.layer_map[conv1][0][0]
+        nengo_relu = converter.layer_map[relu_layer][0][0]
+
+        # adjust ensemble gains
+        nengo_conv.ensemble.gain = nengo.dists.Choice([gain * gain_scale])
+        nengo_relu.ensemble.gain = nengo.dists.Choice([gain * gain_scale])
+
         self.net = converter.net
 
+        with self.net:
+            #NOTE to avoid OOM errors, only have one neuron probe set at a time
+            self.neuron_probe = nengo.Probe(nengo_conv.ensemble.neurons) #[:20000])
+            # self.neuron_probe = nengo.Probe(nengo_relu.ensemble.neurons)
+            # set our biases to non-trainable
+            self.net.config[nengo_conv.ensemble.neurons].trainable = False
+            self.net.config[nengo_relu.ensemble.neurons].trainable = False
+
+        # set our synapses
+        for cc, conn in enumerate(self.net.all_connections):
+            conn.synapse = synapses[cc]
+            print('Setting synapse to %s on ' % str(synapses[cc]), conn)
+        self.dense_output.synapse = synapses[3]
+        print('Setting synapse to %s on output probe' % str(synapses[3]))
+
+        self.sim = nengo_dl.Simulator(self.net, minibatch_size=self.minibatch_size, seed=self.seed)
+
+
+    def extend_net(self):
+        # our input node function
+        def send_image_in(t):
+            #TODO catch exception if validation images don't exist and warn user they
+            # need to be set manually
+            if self.net.count is not None:
+                # if passing in a list of images to run through one step at a time
+                img = self.net.validation_images[self.net.count]
+                self.net.count += 1
+            else:
+                # if updating an image over time, like rendering from a simulator
+                # then we update this object each time
+                img = self.net.validation_images
+            return img
+
+        # if not using nengo dl we have to use a sim.run function
+        # create a node so we can inject data into the network
+        with self.net:
+            # create out input node
+            image_input_node = nengo.Node(send_image_in, size_out=self.subpixels)
+            self.input_probe = nengo.Probe(image_input_node)
+            nengo.Connection(image_input_node, self.vision_input, synapse=None)
+
+        # overwrite the nengo_dl simulator with the nengo simulator
+        self.sim = nengo.Simulator(self.net, dt=self.dt)
+
+
+    def train(
+            self, images, targets, epochs, validation_images=None,
+            n_validation_steps=10, weights_loc=None):
+        """
+        We loop through from epochs[0] to epochs[1], so if epochs[0]
+        is not 0 then this function assumes the weights to start
+        with will be at '%sepoch_%i' % (weights_loc, epoch-1)
+
+        In other words it is assumed that if our starting epoch is not
+        0 then we should be loading weights from the previous epoch
+        """
+        if validation_images is not None:
+            validation_images_dict = {
+                self.vision_input: validation_images
+            }
+        training_images_dict = {
+                self.vision_input: images
+            }
+
+        with self.sim:
+            sim.compile(
+                optimizer=tf.optimizers.RMSprop(0.001),
+                loss={self.dense_output: tf.losses.mse})
+
+            for epoch in range(epochs[0], epochs[1]):
+                print('\nEPOCH %i' % epoch)
+                if epoch>0:
+                    prev_params_loc = '%sepoch_%i' % (weights_loc, epoch-1)
+                    print('loading pretrained network parameters from \n%s' % prev_params_loc)
+                    sim.load_params(prev_params_loc)
+
+                print('fitting data...')
+                sim.fit(training_images_dict, targets, epochs=1)
+
+                # save parameters back into net
+                sim.freeze_params(self.net)
+
+                current_params_loc = '%sepoch_%i' % (weights_loc, epoch)
+                print('saving network parameters to %s' % current_params_loc)
+                sim.save_params(current_params_loc)
+
+                if validation_images is not None:
+                    print('Running Prediction in nengo-dl')
+                    data = sim.predict(validation_images_dict, n_steps=n_validation_steps, stateful=False)
+
+                #TODO fix plotting NEED access to num_pts
+                plot_predict(
+                        predictions=data, target_vals=validation_targets,
+                        save_folder=save_folder, group_name=group_name,
+                        num_pts=num_pts)
+
+
+    def predict(self, images, n_validation_steps, weights=None):
+        print('Running prediction for %i steps per image,  with images shape' % n_validation_steps, images.shape)
+        # load a specific set of weights
         if weights is not None:
-            # with nengo_dl.Simulator(self.net, minibatch_size=self.minibatch_size, seed=self.seed) as sim:
-            with nengo_dl.Simulator(self.net) as sim:
+            with nengo_dl.Simulator(
+                    self.net, minibatch_size=self.minibatch_size, seed=self.seed) as sim:
+                print('Received specific weights to use: ', weights)
                 sim.load_params(weights)
                 sim.freeze_params(self.net)
 
+        validation_images_dict = {
+            self.vision_input: images
+        }
+        with self.sim:
+            data = self.sim.predict(validation_images_dict, n_steps=images.shape[1], stateful=False)
 
-    # def predict(self, images, targets=None, show_fig=False): #, save_folder='', save_name='prediction_results', num_pts=100):
-    #     """
-    #     Parameters
-    #     ----------
-    #     stateful: boolean, Optional (Default: False)
-    #         True: learn during this pass, weights will be updated
-    #         False: weights will revert to what they were at the start
-    #         of the prediction
-    #     """
-    #     images = np.asarray(images)
-    #     shape = images.shape
-    #     # print(images)
-    #     if images.ndim == 3:
-    #         batch_size = 1
-    #         subpixels = shape[0]*shape[1]*shape[2]
-    #         images = images.reshape(1, shape[0], shape[1], shape[2])
-    #     elif images.ndim == 4:
-    #         batch_size = shape[0]
-    #         subpixels = shape[1]*shape[2]*shape[3]
-    #
-    #     images_dict = {
-    #         self.image_input: images.reshape(
-    #             (batch_size, 1, subpixels))
-    #     }
-    #
-    #     with nengo_dl.Simulator(self.net, minibatch_size=self.minibatch_size, seed=self.seed) as sim:
-    #         data = sim.predict(images_dict, n_steps=1, stateful=False)
-    #         predictions = np.asarray(data[self.output_probe]).squeeze()
-    #
-    #         if show_fig:
-    #             fig = plt.Figure()
-    #             num_pts = 100
-    #             plt.plot(targets[-num_pts:], label='target', color='r')
-    #             plt.plot(predictions[-num_pts:], label='predictions', color='k', linestyle='--')
-    #             plt.legend()
-    #             plt.show()
-    #             plt.close()
-    #             fig = None
-    #
-    #     return predictions
-    #
-    #
-    # def resize_images(
-    #         self, image_data, res, rows=None, show_resized_image=False, flatten=True):
-    #     # single image, append 1 dimension so we can loop through the same way
-    #     image_data = np.asarray(image_data)
-    #     if image_data.ndim == 3:
-    #         shape = image_data.shape
-    #         image_data = image_data.reshape((1, shape[0], shape[1], shape[2]))
-    #
-    #     # expect rgb image data
-    #     assert image_data.shape[3] == 3
-    #
-    #     scaled_image_data = []
-    #
-    #     for count, data in enumerate(image_data):
-    #         # normalize
-    #         rgb = np.asarray(data)/255
-    #
-    #         # select a subset of rows and update the vertical resolution
-    #         if rows is not None:
-    #             rgb = rgb[rows[0]:rows[1], :, :]
-    #             res[0] = rows[1]-rows[0]
-    #
-    #         # resize image resolution
-    #         rgb = cv2.resize(
-    #             rgb, dsize=(res[1], res[0]),
-    #             interpolation=cv2.INTER_CUBIC)
-    #
-    #         # visualize scaling for debugging
-    #         if show_resized_image:
-    #             plt.Figure()
-    #             a = plt.subplot(121)
-    #             a.set_title('Original')
-    #             a.imshow(data, origin='lower')
-    #             b = plt.subplot(122)
-    #             b.set_title('Scaled')
-    #             b.imshow(rgb, origin='lower')
-    #             plt.show()
-    #
-    #         # flatten to 1D
-    #         #NOTE should use np.ravel to maintain image order
-    #         if flatten:
-    #             rgb = rgb.flatten()
-    #         # scale image from -1 to 1 and save to list
-    #         scaled_image_data.append(rgb*2 - 1)
-    #
-    #     scaled_image_data = np.asarray(scaled_image_data)
-    #
-    #     return scaled_image_data
-    #
-    # def target_angle_from_local_error(self, local_error):
-    #     local_error = np.asarray(local_error)
-    #     if local_error.ndim == 3:
-    #         shape = local_error.shape
-    #         local_error = local_error.reshape((1, shape[0], shape[1], shape[2]))
-    #
-    #     angles = []
-    #     for error in local_error:
-    #         angles.append(math.atan2(error[1], error[0]))
-    #
-    #     angles = np.array(angles)
-    #
-    #     # angles = math.atan2(local_error[1], local_error[0])
-    #
-    #     return angles
+        return data
 
+
+    def run(self, images, sim_steps, weights=None):
+        # load a specific set of weights
+        if weights is not None:
+            with nengo_dl.Simulator(
+                    self.net, minibatch_size=self.minibatch_size, seed=self.seed) as sim:
+                print('Received specific weights to use: ', weights)
+                sim.load_params(weights)
+                sim.freeze_params(self.net)
+                # since we've changed our net object we need to update our nengo sim
+            self.sim = nengo.Simulator(self.net, dt=self.dt)
+
+        # NOTE that the user will need to pass their input image to
+        # rover_vision.net.validation_images if using an external rover_vision.sim.run call
+        self.net.count = 0
+        self.net.validation_images = images
+
+        # we have to extend our network to be able to manually inject input images
+        # and to switch from the nengo_dl to the nengo simulator
+        self.extend_net()
+
+        with self.sim:
+            print('Starting Nengo sim...')
+            # match our sim length for nengo-dl
+            self.sim.run(sim_steps)
+
+        return self.sim.data
 
 if __name__ == '__main__':
-    from abr_analyze import DataHandler
-    dat = DataHandler('rover_training_0004')
-    weights = 'saved_net_32x128_learn_xy'
-    res=[32, 128]
-    minibatch_size = 1
+    # ------------ set test parameters
+    mode = 'predict'
+    # mode = 'train'
+    # mode = 'run'
+    spiking = True
+    gain = 1
+    dt = 0.001
+    db_name = 'rover_training_0004'
+    res = [32, 128]
+    n_training = 30000 # number of images to train on
+    n_validation = 10 # number of validation images
+    seed = 0
 
-    # instantiate vision class
-    rover = RoverVision(res=res, weights=weights, minibatch_size=minibatch_size)
+    if spiking:
+        # typically for validation with spiking neurons
+        train_on_data = False
+        n_validation_steps = 300
+        n_training_steps = None # should not train with spikes, this will throw an error
+        gain_scale = 1000
+        synapses = [None, None, None, 0.05]
+        weights = 'data/rover_training_0004/biases_non_trainable/filters_32/biases_non_trainable_23'
+        epochs = None
+    else:
+        # typically for training with rate neurons
+        train_on_data = True
+        n_validation_steps = 1
+        n_training_steps = 1
+        gain_scale = 1
+        synapses = [None, None, None, None]
+        weights = None
+        epochs = [0, 24]
 
-    # load training images
-    # training_images = []
-    # training_targets = []
-    # for nn in range(0, 1000):
-    #     data = dat.load(parameters=['rgb', 'local_error'], save_location='validation_0000/data/%04d' % nn)
-    #     training_images.append(data['rgb'])
-    #     training_targets.append(data['local_error'])
+    # using baseline of 1ms timesteps to define n_steps
+    n_validation_steps = int(n_validation_steps * 0.001/dt) # adjust based on dt to keep sim time constant
 
-    # scale image resolution
-    # training_images = rover.resize_images(
-    #     image_data=training_images,
-    #     res=res,
-    #     show_resized_image=False,
-    #     flatten=False)
+    if mode == 'train':
+        minibatch_size = 1000
+    else:
+        minibatch_size = 1
+    minibatch_size = min(minibatch_size, n_validation) # can't have a minibatch larger than our number of images
 
-    # get target angle
-    # training_targets = rover.target_angle_from_local_error(training_targets)
+    # plotting parameters
+    custom_save_tag = '' # if you want to prepend some tag to saved images
+    num_imgs_to_show = 10
+    num_imgs_to_show = min(num_imgs_to_show, n_validation)
+    num_pts = num_imgs_to_show*n_validation_steps # number of steps to plot
 
-    # predictions = rover.predict(images=training_images, targets=training_targets, show_fig=True)
-    try:
-        sim = nengo_loihi.Simulator(
-            rover.net, target='sim')
+    # ------------ load and prepare our data
+    if train_on_data:
+        # load our raw data
+        training_images, training_targets = dl_utils.load_data(
+            res=res, db_name=db_name, label='training_0000', n_imgs=n_training)
 
-        while 1:
-            sim.run(1e5)
+        # do our resizing, scaling, and flattening
+        training_images = dl_utils.preprocess_images(
+            image_data=training_images,
+            show_resized_image=False,
+            flatten=True,
+            normalize=True,
+            res=res)
 
-    except ExitSim:
-        pass
+        # repeat and batch our data
+        training_images = dl_utils.repeat_data(
+            data=training_images,
+            batch_data=True,
+            n_steps=n_training_steps)
+        training_targets = dl_utils.repeat_data(
+            data=training_targets,
+            batch_data=True,
+            n_steps=n_training_steps)
 
-    finally:
-        sim.close()
+    # load our raw data
+    validation_images, validation_targets = dl_utils.load_data(
+        res=res, db_name=db_name, label='validation_0000', n_imgs=n_validation)
+
+    # do our resizing, scaling, and flattening
+    validation_images = dl_utils.preprocess_images(
+            image_data=validation_images,
+            show_resized_image=False,
+            flatten=True,
+            normalize=True,
+            res=res)
+
+    # repeat and batch our data
+    validation_images = dl_utils.repeat_data(
+        data=validation_images,
+        batch_data=False,
+        n_steps=n_validation_steps)
+    validation_targets = dl_utils.repeat_data(
+        data=validation_targets,
+        batch_data=False,
+        n_steps=n_validation_steps)
 
 
+    # ------------ set up data tracking
+    save_db_name = '%s_results' % db_name # for saving results to
+    group_name = 'changing_batchsize' # helps to define what this group of tests is doing
+    test_name = 'batchsize_1'
+    # for saving figures and weights
+    save_folder = 'data/%s/%s/%s' % (db_name, group_name, test_name)
+    if not os.path.exists(save_folder):
+        os.makedirs(save_folder)
+
+    # Notes to save with this test
+    notes = (
+    '''
+    \n- setting biases to non-trainable
+    \n- 32 filters
+    \n- bias off on all layer, loihi restriction
+    \n- default kernel initializers
+    \n- 1 conv layers 1 dense
+    \n- adding relu layer between input and conv1 due to loihi comm restriction
+    \n- changing image scaling from -1 to 1, to 0 to 1 due to loihi comm restriction
+    '''
+            )
+
+    test_params = {
+        'spiking': spiking,
+        'gain': gain,
+        'dt': dt,
+        'train_on_data': train_on_data,
+        'n_validation_steps': n_validation_steps,
+        'n_training_steps': n_training_steps,
+        'gain_scale': gain_scale,
+        'synapses': synapses,
+        'starting_weights_loc': weights,
+        'epochs': epochs,
+        'n_training': n_training,
+        'n_validation': n_validation,
+        'res': res,
+        'minibatch_size': minibatch_size,
+        'seed': seed,
+        'notes': notes,
+        }
+
+    # Save our set up parameters
+    dat_results = DataHandler(db_name=save_db_name)
+    dat_results.save(data=test_params, save_location='%s/params'%save_folder, overwrite=True)
+
+    # instantiate our keras converted network
+    vision = RoverVision(
+        res=res, minibatch_size=minibatch_size, spiking=spiking, dt=dt,
+        gain=gain, gain_scale=gain_scale, seed=seed, synapses=synapses)
+
+    # if training
+    if mode == 'training':
+        vision.train(
+            images=training_images,
+            targets=trainig_targets,
+            epochs=epochs,
+            validation_images=validation_images,
+            n_validation_steps=n_validation_steps,
+            weights_loc=save_folder)
+
+    # if batched prediction
+    if mode == 'predict':
+        data = vision.predict(images=validation_images, n_validation_steps=n_validation_steps, weights=weights)
+
+    # if non-batched prediction using sim.run
+    # the extend function gives you access to the input keras layer so you can inject data
+    if mode == 'run':
+        sim_steps = dt*n_validation_steps*n_validation
+        data = vision.run(
+            images=np.asarray(validation_images).squeeze(), sim_steps=sim_steps, weights=weights)
+
+    dl_utils.plot_prediction_error(
+            predictions=np.asarray(data[vision.dense_output]), target_vals=validation_targets,
+            save_folder=save_folder, save_name='%s_prediction_error'%mode, num_pts=num_pts)
+
+    #NOTE not implemented yet
