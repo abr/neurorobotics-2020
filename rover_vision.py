@@ -31,7 +31,7 @@ if gpus:
 class RoverVision():
     def __init__(
             self, res, minibatch_size, spiking, dt,
-            gain, gain_scale, seed, synapses):
+            gain, gain_scale, seed, synapses, probe_neurons=False):
 
         self.dt = dt
         self.seed = seed
@@ -99,8 +99,10 @@ class RoverVision():
 
         with self.net:
             #NOTE to avoid OOM errors, only have one neuron probe set at a time
-            self.neuron_probe = nengo.Probe(nengo_conv.ensemble.neurons) #[:20000])
-            # self.neuron_probe = nengo.Probe(nengo_relu.ensemble.neurons)
+            if probe_neurons:
+                self.neuron_probe = nengo.Probe(nengo_conv.ensemble.neurons) #[:20000])
+                # self.neuron_probe = nengo.Probe(nengo_relu.ensemble.neurons)
+
             # set our biases to non-trainable
             self.net.config[nengo_conv.ensemble.neurons].trainable = False
             self.net.config[nengo_relu.ensemble.neurons].trainable = False
@@ -144,11 +146,12 @@ class RoverVision():
 
     def train(
             self, images, targets, epochs, validation_images=None,
-            n_validation_steps=10, weights_loc=None):
+            n_validation_steps=10, weights_loc=None, save_folder=None,
+            validation_targets=None, num_pts=None):
         """
         We loop through from epochs[0] to epochs[1], so if epochs[0]
         is not 0 then this function assumes the weights to start
-        with will be at '%sepoch_%i' % (weights_loc, epoch-1)
+        with will be at '%s/epoch_%i' % (weights_loc, epoch-1)
 
         In other words it is assumed that if our starting epoch is not
         0 then we should be loading weights from the previous epoch
@@ -162,35 +165,41 @@ class RoverVision():
             }
 
         with self.sim:
-            sim.compile(
+            self.sim.compile(
                 optimizer=tf.optimizers.RMSprop(0.001),
                 loss={self.dense_output: tf.losses.mse})
 
             for epoch in range(epochs[0], epochs[1]):
                 print('\nEPOCH %i' % epoch)
                 if epoch>0:
-                    prev_params_loc = '%sepoch_%i' % (weights_loc, epoch-1)
+                    prev_params_loc = '%s/epoch_%i' % (weights_loc, epoch-1)
                     print('loading pretrained network parameters from \n%s' % prev_params_loc)
-                    sim.load_params(prev_params_loc)
+                    self.sim.load_params(prev_params_loc)
 
                 print('fitting data...')
-                sim.fit(training_images_dict, targets, epochs=1)
+                self.sim.fit(training_images_dict, targets, epochs=1)
 
                 # save parameters back into net
-                sim.freeze_params(self.net)
+                self.sim.freeze_params(self.net)
 
-                current_params_loc = '%sepoch_%i' % (weights_loc, epoch)
+                current_params_loc = '%s/epoch_%i' % (weights_loc, epoch)
                 print('saving network parameters to %s' % current_params_loc)
-                sim.save_params(current_params_loc)
+                self.sim.save_params(current_params_loc)
 
                 if validation_images is not None:
                     print('Running Prediction in nengo-dl')
-                    data = sim.predict(validation_images_dict, n_steps=n_validation_steps, stateful=False)
+                    data = self.sim.predict(
+                        validation_images_dict,
+                        n_steps=validation_images.shape[1],
+                        stateful=False)
 
                 #TODO fix plotting NEED access to num_pts
-                plot_predict(
-                        predictions=data, target_vals=validation_targets,
-                        save_folder=save_folder, group_name=group_name,
+
+                dl_utils.plot_prediction_error(
+                        predictions=np.asarray(data[vision.dense_output]),
+                        target_vals=validation_targets,
+                        save_folder=save_folder,
+                        save_name='validation_error_epoch_%i' % epoch,
                         num_pts=num_pts)
 
 
@@ -203,6 +212,9 @@ class RoverVision():
                 print('Received specific weights to use: ', weights)
                 sim.load_params(weights)
                 sim.freeze_params(self.net)
+
+            # update our class sim object with the new net with weights
+            self.sim = nengo_dl.Simulator(self.net, minibatch_size=self.minibatch_size, seed=self.seed)
 
         validation_images_dict = {
             self.vision_input: images
@@ -242,21 +254,21 @@ class RoverVision():
 
 if __name__ == '__main__':
     # ------------ set test parameters
-    mode = 'predict'
-    # mode = 'train'
+    # mode = 'predict'
+    mode = 'train'
     # mode = 'run'
-    spiking = True
+    spiking = False
     gain = 1
     dt = 0.001
     db_name = 'rover_training_0004'
     res = [32, 128]
     n_training = 30000 # number of images to train on
-    n_validation = 10 # number of validation images
+    n_validation = 100 # number of validation images
     seed = 0
+    probe_neurons = True
 
     if spiking:
         # typically for validation with spiking neurons
-        train_on_data = False
         n_validation_steps = 300
         n_training_steps = None # should not train with spikes, this will throw an error
         gain_scale = 1000
@@ -265,31 +277,30 @@ if __name__ == '__main__':
         epochs = None
     else:
         # typically for training with rate neurons
-        train_on_data = True
         n_validation_steps = 1
         n_training_steps = 1
         gain_scale = 1
         synapses = [None, None, None, None]
         weights = None
-        epochs = [0, 24]
+        epochs = [0, 10]
 
     # using baseline of 1ms timesteps to define n_steps
     n_validation_steps = int(n_validation_steps * 0.001/dt) # adjust based on dt to keep sim time constant
 
     if mode == 'train':
-        minibatch_size = 1000
+        minibatch_size = 100
     else:
         minibatch_size = 1
     minibatch_size = min(minibatch_size, n_validation) # can't have a minibatch larger than our number of images
 
     # plotting parameters
     custom_save_tag = '' # if you want to prepend some tag to saved images
-    num_imgs_to_show = 10
+    num_imgs_to_show = 10 # number of image predictions to show in the results plot
     num_imgs_to_show = min(num_imgs_to_show, n_validation)
     num_pts = num_imgs_to_show*n_validation_steps # number of steps to plot
 
     # ------------ load and prepare our data
-    if train_on_data:
+    if mode == 'train':
         # load our raw data
         training_images, training_targets = dl_utils.load_data(
             res=res, db_name=db_name, label='training_0000', n_imgs=n_training)
@@ -324,21 +335,32 @@ if __name__ == '__main__':
             normalize=True,
             res=res)
 
+    # we have to set the minibatch_size when instantiating the network so if we want
+    # to run sim.predict after each training session to track progress, we need to have
+    # a consistent minibatch_size between training and predicting
+    # this is also using rate neurons during training so it doesn't matter if the
+    # prediction is batched (won't have the output zeroed between minibatches since
+    # we aren't using spiking neurons)
+    if mode == 'train':
+        batch_data = True
+    else:
+        batch_data = False
+
     # repeat and batch our data
     validation_images = dl_utils.repeat_data(
         data=validation_images,
-        batch_data=False,
+        batch_data=batch_data,
         n_steps=n_validation_steps)
     validation_targets = dl_utils.repeat_data(
         data=validation_targets,
-        batch_data=False,
+        batch_data=batch_data,
         n_steps=n_validation_steps)
 
 
     # ------------ set up data tracking
     save_db_name = '%s_results' % db_name # for saving results to
-    group_name = 'changing_batchsize' # helps to define what this group of tests is doing
-    test_name = 'batchsize_1'
+    group_name = 'test' # helps to define what this group of tests is doing
+    test_name = 'test_1'
     # for saving figures and weights
     save_folder = 'data/%s/%s/%s' % (db_name, group_name, test_name)
     if not os.path.exists(save_folder):
@@ -355,13 +377,12 @@ if __name__ == '__main__':
     \n- adding relu layer between input and conv1 due to loihi comm restriction
     \n- changing image scaling from -1 to 1, to 0 to 1 due to loihi comm restriction
     '''
-            )
+    )
 
     test_params = {
         'spiking': spiking,
         'gain': gain,
         'dt': dt,
-        'train_on_data': train_on_data,
         'n_validation_steps': n_validation_steps,
         'n_training_steps': n_training_steps,
         'gain_scale': gain_scale,
@@ -374,6 +395,7 @@ if __name__ == '__main__':
         'minibatch_size': minibatch_size,
         'seed': seed,
         'notes': notes,
+        'probe_neurons': probe_neurons,
         }
 
     # Save our set up parameters
@@ -383,21 +405,29 @@ if __name__ == '__main__':
     # instantiate our keras converted network
     vision = RoverVision(
         res=res, minibatch_size=minibatch_size, spiking=spiking, dt=dt,
-        gain=gain, gain_scale=gain_scale, seed=seed, synapses=synapses)
+        gain=gain, gain_scale=gain_scale, seed=seed, synapses=synapses,
+        probe_neurons=probe_neurons)
 
     # if training
-    if mode == 'training':
+    if mode == 'train':
         vision.train(
             images=training_images,
-            targets=trainig_targets,
+            targets=training_targets,
             epochs=epochs,
             validation_images=validation_images,
             n_validation_steps=n_validation_steps,
-            weights_loc=save_folder)
+            weights_loc=save_folder,
+            save_folder=save_folder,
+            num_pts=num_pts,
+            validation_targets=validation_targets)
 
     # if batched prediction
     if mode == 'predict':
         data = vision.predict(images=validation_images, n_validation_steps=n_validation_steps, weights=weights)
+
+        dl_utils.plot_prediction_error(
+                predictions=np.asarray(data[vision.dense_output]), target_vals=validation_targets,
+                save_folder=save_folder, save_name='%s_prediction_error'%mode, num_pts=num_pts)
 
     # if non-batched prediction using sim.run
     # the extend function gives you access to the input keras layer so you can inject data
@@ -406,8 +436,9 @@ if __name__ == '__main__':
         data = vision.run(
             images=np.asarray(validation_images).squeeze(), sim_steps=sim_steps, weights=weights)
 
-    dl_utils.plot_prediction_error(
-            predictions=np.asarray(data[vision.dense_output]), target_vals=validation_targets,
-            save_folder=save_folder, save_name='%s_prediction_error'%mode, num_pts=num_pts)
+        dl_utils.plot_prediction_error(
+                predictions=np.asarray(data[vision.dense_output]), target_vals=validation_targets,
+                save_folder=save_folder, save_name='%s_prediction_error'%mode, num_pts=num_pts)
 
     #NOTE not implemented yet
+    # dl_utils.plot_neuron_activity()

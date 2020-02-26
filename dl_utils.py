@@ -185,6 +185,8 @@ def plot_prediction_error(
     plt.tight_layout()
     plt.savefig('%s/%s.png' % (save_folder, save_name))
     print('Saving prediction results to %s/%s.png' % (save_folder, save_name))
+    plt.close()
+
 
 def plot_neuron_activity(
         activity, num_pts, save_folder='', save_name='activity'):
