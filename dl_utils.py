@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from abr_analyze import DataHandler
 import matplotlib.pyplot as plt
+from nengo.utils.matplotlib import rasterplot
 
 def preprocess_images(
         image_data, res, show_resized_image=False, flatten=True, normalize=True):
@@ -189,96 +190,95 @@ def plot_prediction_error(
 
 
 def plot_neuron_activity(
-        activity, num_pts, save_folder='', save_name='activity'):
+        activity, num_pts, save_folder='', save_name='activity', num_neurons_to_plot=100,
+        images=None):
 
-    raise NotImplementedError
-    # rasterplot of our neural activity for a subset of neurons
-    neurons_to_plot = 100
-
-    a4 = plt.subplot(224)
+    print('\nNEURON ACTIVITY')
+    # flatten our activity over time so we can extract only neurons that have some activity
     shape = activity.shape
     print('activity shape: ', shape)
-    # flatten our activity over time so we can extract only neurons that have some activity
     if activity.ndim == 3:
         activity = activity.reshape(shape[0]*shape[1], shape[2], order='C')
     print('reshaped activity: ', activity.shape)
+
     # sum our activity over time, should have an array of length n_neurons
     activity_over_time = np.sum(activity, axis=0)
-    print('if I did this right %i should match' % (shape[-1]), activity_over_time.shape)
+    assert shape[-1] == activity_over_time.shape[0]
+    # print('if I did this right %i should match' % (shape[-1]), activity_over_time.shape)
+
+    # track how many neurons never activate
     zero_count = 0
     non_zero_neurons = []
+
     # loop through our activities and find the index of active neurons
     for index, neuron in enumerate(activity_over_time):
         if neuron == 0:
             zero_count += 1
         else:
             non_zero_neurons.append(index)
+
     # extract non zero activities
     non_zero_activity = [activity[:, i] for i in non_zero_neurons]
+
     # keep time/batch_size as our first dimension
     non_zero_activity = np.asarray(non_zero_activity).T
+    assert non_zero_activity.shape[1] == activity.shape[1] - zero_count
+
     print('%i neurons never fire' % zero_count)
     print('%i neurons fire' % len(non_zero_neurons))
+
     print('non zero activity shape: ', non_zero_activity.shape)
-    print('only plotting %i neurons out of %i' %(neurons_to_plot, non_zero_activity.shape[1]))
+    print('only plotting %i neurons out of %i active neurons' %(num_neurons_to_plot, non_zero_activity.shape[1]))
     print('only showing the last %i timesteps out of %i' %(num_pts, non_zero_activity.shape[0]))
+
     # evenly select our neurons instead of grabbing them sequentially
-    neuron_step = int(non_zero_activity.shape[1]/neurons_to_plot)
+    neuron_step = int(non_zero_activity.shape[1]/num_neurons_to_plot)
     print('choosing every %i neuron' % neuron_step)
     activity_to_plot =  non_zero_activity[-num_pts:, ::neuron_step]
     t = np.arange(0, num_pts, 1)
-    print('t: ', t.shape)
-    print('act: ', activity_to_plot.shape)
+
+    # rasterplot of our neural activity for a subset of neurons
+    plt.figure()
+    plt.subplot(111)
     rasterplot(t, activity_to_plot)
     plt.tight_layout()
-    plt.savefig('%s/%s.png' % (save_folder, group_name))
-    print('saving figure to %s/%s' % (save_folder, group_name))
+    plt.savefig('%s/%s_rasterplot.png' % (save_folder, save_name))
+    print('saving figure to %s/%s_rasterplot.png' % (save_folder, save_name))
     plt.close()
 
     # plots neural activity of individual neurons over n_steps for each image, next to the input image
-    show_hist = False
-    if show_hist:
-        if not spiking:
-            plt.figure()
-            plt.subplot(111)
-            plt.title('ACTIVE: %i | INACTIVE: %i' % (np.array(non_zero_activity).shape[1], zero_count))
-            shape = non_zero_activity.shape
-            x = non_zero_activity.reshape(shape[0]*shape[1])
-            plt.ylabel('Rate Neuron Outputs')
-            plt.hist(x, bins=40)
-            plt.legend()
-            plt.savefig('%s/activity_%s.png' % (save_folder, group_name))
-        else:
-            n_neuron_activities_to_plot = 10
-            for neuron in range(0, n_neuron_activities_to_plot):
-                # neuron = np.random.randint(0, non_zero_activity.shape[1])
-                # neuron = [87, 88, 89 , 90, 91, 92, 93, 94, 95, 96, 97, 98][neurons]
-                # x is activity for a single neuron over n steps for all images
-                x = non_zero_activity[:, neuron]
-                print('single neuron activity shape: ', x.shape)
-                # reshape so we can separate by image
-                x = x.reshape(num_imgs_to_show, n_val_steps)
-                print('reshaped: ', x.shape)
+    #TODO may want to reorder this to have all neurons plotted together instead of in separate figures
+    if images is not None:
+        for neuron in range(0, num_neurons_to_plot):
+            # x is activity for a single neuron over num_pts steps
+            # use the same neurons selected in the rasterplot
+            single_activity = non_zero_activity[:, neuron_step*neuron]
+            print('single neuron activity shape: ', single_activity.shape)
+            # reshape so we can separate by image
+            num_images = images.shape[0]
+            # we show the images for some number of timesteps, divide the total steps
+            # by the number of images so we can split the activity by image change
+            n_val_steps = int(single_activity.shape[0] / num_images)
+            single_activity = single_activity.reshape(num_images, n_val_steps)
+            print('reshaped by image: ', single_activity.shape)
 
-                plt.figure(figsize=(10, 10))
-                plt.title('Neuron %i Activity over %i steps' % (neuron, n_val_steps))
-                for ii, x_img in enumerate(x):
-                    # plt.subplot2grid((len(x), 6), (ii, 0), colspan=2, rowspan=1)
-                    # plt.imshow(prediction_data[input_probe][int(ii), :].reshape((res[0], res[1], 3)), origin='lower')
-                    # plt.title('Probed Input %i' % int(ii))
-                    plt.subplot2grid((len(x), 4), (ii, 0), colspan=2, rowspan=1)
-                    # image ii, timestep 0 of n_val_steps, all subpixels
-                    # plt.imshow(validation_images[ii, 0, :].reshape((res[0], res[1], 3)), origin='lower')
-                    plt.imshow(validation_images[:, ii*n_val_steps, :].reshape((res[0], res[1], 3)), origin='lower')
-                    plt.title('Image %i' % ii)
-                    # plt.subplot(len(x), 1, ii+1)
-                    plt.subplot2grid((len(x), 4), (ii, 2), colspan=2, rowspan=1)
-                    # plt.plot(non_zero_activity[:, 0])
-                    plt.plot(x_img, label=ii)
-                plt.tight_layout()
-                plt.savefig('%s/%s_img_spikes_neuron%i_%s.png' % (save_folder, backend, neuron, group_name))
-                # plt.show()
+            plt.figure(figsize=(10, 10))
+            plt.title('Neuron %i Activity over %i steps' % (neuron, n_val_steps))
+            for ii, image_activity in enumerate(single_activity):
+                plt.subplot2grid((len(single_activity), 4), (ii, 0), colspan=2, rowspan=1)
+                plt.imshow(images[ii], origin='lower')
+                plt.title('Image %i' % ii)
+                # plt.subplot(len(x), 1, ii+1)
+                plt.subplot2grid((len(single_activity), 4), (ii, 2), colspan=2, rowspan=1)
+                # plt.plot(non_zero_activity[:, 0])
+                plt.plot(image_activity, label=ii)
+            plt.tight_layout()
+            plt.savefig('%s/%s_neuron%i_spikes.png' % (save_folder, save_name, neuron))
+            # plt.show()
 
+def plot_training_errors():
+    raise NotImplementedError
+    #TODO this is for tracking the final error after each epoch
     # tracks our final error as we train so we can see our progression
     #TODO need to rewrite this as we don't have access to train_on_data
     if not train_on_data:
@@ -302,10 +302,10 @@ def plot_neuron_activity(
         plt.savefig('%s/final_epoch_error.png' % (save_folder))
         plt.close()
 
-        save_data = {group_name: predictions, 'final_errors': final_errors}
+        save_data = {save_name: predictions, 'final_errors': final_errors}
 
     else:
-        save_data = {group_name: predictions}
+        save_data = {save_name: predictions}
 
     dat_results.save(
         data=save_data,

@@ -10,7 +10,6 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from abr_analyze import DataHandler
-from nengo.utils.matplotlib import rasterplot
 
 
 # =================== Tensorflow settings to avoid OOM errors =================
@@ -255,15 +254,15 @@ class RoverVision():
 if __name__ == '__main__':
     # ------------ set test parameters
     # mode = 'predict'
-    mode = 'train'
-    # mode = 'run'
-    spiking = False
+    # mode = 'train'
+    mode = 'run'
+    spiking = True
     gain = 1
     dt = 0.001
     db_name = 'rover_training_0004'
     res = [32, 128]
     n_training = 30000 # number of images to train on
-    n_validation = 100 # number of validation images
+    n_validation = 10 # number of validation images
     seed = 0
     probe_neurons = True
 
@@ -289,6 +288,8 @@ if __name__ == '__main__':
 
     if mode == 'train':
         minibatch_size = 100
+        # we can't run our inference after training with fewer images than our minibatch_size
+        n_validation = minibatch_size
     else:
         minibatch_size = 1
     minibatch_size = min(minibatch_size, n_validation) # can't have a minibatch larger than our number of images
@@ -432,6 +433,7 @@ if __name__ == '__main__':
     # if non-batched prediction using sim.run
     # the extend function gives you access to the input keras layer so you can inject data
     if mode == 'run':
+        print('VAL SHAPE: ', validation_images.shape)
         sim_steps = dt*n_validation_steps*n_validation
         data = vision.run(
             images=np.asarray(validation_images).squeeze(), sim_steps=sim_steps, weights=weights)
@@ -440,5 +442,18 @@ if __name__ == '__main__':
                 predictions=np.asarray(data[vision.dense_output]), target_vals=validation_targets,
                 save_folder=save_folder, save_name='%s_prediction_error'%mode, num_pts=num_pts)
 
-    #NOTE not implemented yet
-    # dl_utils.plot_neuron_activity()
+    if probe_neurons:
+        # pass in the input images so we can see the neural activity next to the input image
+        # since we repeat n_validation_steps times, just take the first column in the 2nd dim
+        images = validation_images.reshape(
+                (n_validation, n_validation_steps, res[0], res[1], 3))[:, 0, :, :, :].squeeze()
+        # skip showing the neurons next to images
+        images = None
+
+        dl_utils.plot_neuron_activity(
+                activity=data[vision.neuron_probe],
+                num_pts=num_pts,
+                save_folder=save_folder,
+                save_name='%s_activity'%mode,
+                num_neurons_to_plot=100,
+                images=images)
