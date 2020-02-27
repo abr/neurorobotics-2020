@@ -101,7 +101,7 @@ def repeat_data(data, batch_data=False, n_steps=1):
     return data
 
 
-def load_data(res, db_name, label='training_0000', n_imgs=None):
+def load_data(db_name, label='training_0000', n_imgs=None):
     """
     loads rgb images and targets from an hdf5 database and returns them as a np array
 

@@ -304,7 +304,7 @@ if __name__ == '__main__':
     if mode == 'train':
         # load our raw data
         training_images, training_targets = dl_utils.load_data(
-            res=res, db_name=db_name, label='training_0000', n_imgs=n_training)
+            db_name=db_name, label='training_0000', n_imgs=n_training)
 
         # do our resizing, scaling, and flattening
         training_images = dl_utils.preprocess_images(
@@ -326,7 +326,7 @@ if __name__ == '__main__':
 
     # load our raw data
     validation_images, validation_targets = dl_utils.load_data(
-        res=res, db_name=db_name, label='validation_0000', n_imgs=n_validation)
+        db_name=db_name, label='validation_0000', n_imgs=n_validation)
 
     # do our resizing, scaling, and flattening
     validation_images = dl_utils.preprocess_images(
