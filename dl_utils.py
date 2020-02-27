@@ -33,16 +33,16 @@ def preprocess_images(
     assert image_data.shape[3] == 3
 
     for count, data in enumerate(image_data):
+        rgb = np.asarray(data)
         # normalize
         if normalize:
             if np.mean(data) > 1:
                 if count == 0: # only print for the first image
                     print('Image passed in 0-255, normalizing to 0-1')
-                rgb = np.asarray(data)/255
+                rgb = rgb/255
             else:
                 if count == 0: # only print for the first image
                     print('Image passed in 0-1, skipping normalizing')
-                rgb = np.asarray(data)
 
 
         # resize image resolution
@@ -127,8 +127,7 @@ def load_data(db_name, label='training_0000', n_imgs=None):
         training_targets.append(data['target'])
 
     training_images = np.asarray(training_images)
-    #NOTE: kind of hacky taking the desired xy dim here, data should be saved accordingly
-    training_targets = np.asarray(training_targets)[:, 0:2]
+    training_targets = np.asarray(training_targets)
 
     return training_images, training_targets
 

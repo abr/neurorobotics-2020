@@ -1,6 +1,6 @@
 import nengo
 import nengo_dl
-import nengo_loihi
+# import nengo_loihi
 import keras
 import cv2
 import warnings
@@ -305,6 +305,8 @@ if __name__ == '__main__':
         # load our raw data
         training_images, training_targets = dl_utils.load_data(
             db_name=db_name, label='training_0000', n_imgs=n_training)
+        # our saved targets are 3D but we only care about x and y
+        training_targets = training_targets[:, 0:2]
 
         # do our resizing, scaling, and flattening
         training_images = dl_utils.preprocess_images(
@@ -327,6 +329,9 @@ if __name__ == '__main__':
     # load our raw data
     validation_images, validation_targets = dl_utils.load_data(
         db_name=db_name, label='validation_0000', n_imgs=n_validation)
+
+    # our saved targets are 3D but we only care about x and y
+    validation_targets = validation_targets[:, 0:2]
 
     # do our resizing, scaling, and flattening
     validation_images = dl_utils.preprocess_images(
