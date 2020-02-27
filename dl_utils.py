@@ -8,9 +8,9 @@ def preprocess_images(
         image_data, res, show_resized_image=False, flatten=True, normalize=True):
     """
     Accepts a 3D array (single image) or 4D array (multiple images) of shape
-    (n_imgs, horizontal_pixels, vertical_pixels, rgb_data).
+    (n_imgs, vertical_pixels, horizontal_pixels, rgb_data).
 
-    Returns the image array with the following optional processing
+    Returns the image array with the following Optional processing
         - reshaped to the specified res if not matching
         - normalizing image to be from 0-1 instead of 0-255
         - flattening of images
@@ -19,6 +19,21 @@ def preprocess_images(
     else: returns image array of shape (n_imgs, horizontal_pixels, vertical_pixels, rgb_data).
 
     Note that the printouts will only be output for the first image
+
+    Parameters
+    ----------
+    image_data: 3D or 4D array of floats
+        a single, or array of rgb image(s)
+        shape (n_imgs, vertical pixels, horizontal pixels, 3)
+    res: list of 2 floats
+        the desired resolution of the output images
+    show_resized_image: boolean, Optional (Default: False)
+        plots the image before and after rescaling
+    flatten: boolean, Optional (Default: True)
+        flattens the image to a vector
+        if array of images passed in, will output (n_images, subpixels) shape
+    normalize: boolean, Optional (Default: True)
+        normalize data from 0-255 to 0-1
     """
 
     scaled_image_data = []
@@ -84,8 +99,17 @@ def repeat_data(data, batch_data=False, n_steps=1):
     """
     Accepts flattened data of shape (number images / targets, flattened data length)
     Repeats the data n_steps times and batches the images based on batch_size
+
+    Parameters
+    ----------
+    data: array of floats
+        inputs data of shape (number of imgs / targets, flattened data dimensionality)
+    batch_data: boolean, Optional (Default: False)
+        True: output shape (number imgs / targets, n_steps, flattened dimensionality)
+        False: output shape (1, number imgs / targets * n_steps, flattened dimensionality)
+    n_steps: int, Optional (Default: 1)
+        number of times to repeat each input target / image
     """
-    #TODO generalize this so it work with the parameters being passed in
     print('Data pre_tile: ', data.shape)
     if batch_data:
         # batch our images for training
@@ -114,6 +138,15 @@ def load_data(db_name, label='training_0000', n_imgs=None):
 
         Both return an array with the rgb image saved under the 'rgb' key
         and the target saved under the 'target' key
+
+    Parameters
+    ----------
+    db_name: string
+        name of database to load from
+    label: string, Optional (Default: 'training_0000')
+        location in database to load from
+    n_imgs: int
+        how many images to load
     """
     #TODO: specify the data format expected in the comment above
     dat = DataHandler(db_name)
@@ -135,6 +168,22 @@ def load_data(db_name, label='training_0000', n_imgs=None):
 def plot_prediction_error(
         predictions, target_vals, num_pts,
         save_folder='', save_name='prediction_results'):
+    """
+    Accepts predictions and targets, plots the x and y error, along with the target location
+
+    Parameters
+    ----------
+    predictions: array of floats
+        nengo sim data[output] array
+    target_vals: array of float
+        flattened target data that was passed in during inferece
+    num_pts: int
+        how many steps to plot from the end of the sim
+    save_folder: string
+        location to save figures
+    save_name: string, Optional (Default: 'prediction_results')
+        name to save plot under
+    """
 
     print('plotting %i timesteps' % num_pts)
     print('targets shape: ', np.asarray(target_vals).shape)
@@ -191,6 +240,30 @@ def plot_prediction_error(
 def plot_neuron_activity(
         activity, num_pts, save_folder='', save_name='activity', num_neurons_to_plot=100,
         images=None):
+    """
+    Accepts the nengo sim data[neuron_probe] array and saves the raster plot
+    If the input data is passed in then the individual neuron activity will also be
+    plotted next to the input image. This second figure is currently set to plot
+    num_neurons_to_plot figures, with each figure showing that neurons activity for each
+    input image passed in
+
+    Parameters
+    ----------
+    activity: array of floats
+        nengo sim.data[neuron_probe] array
+    num_pts: int
+        how many steps to plot from the end of the sim
+    save_folder: string
+        location to save figures
+    save_name: string, Optional (Default: 'activity')
+        name to save plot under
+    num_neurons_to_lot: int, Optional(Default: 100)
+        This function will check each neurons activity over time and only
+        plot neurons that were active. The nerons are then evenly selected
+        based on this int
+        ex: if 1000 active neurons and num_neurons_to_plot=10, then each 100th neuron
+        will be plotted
+    """
 
     print('\nNEURON ACTIVITY')
     # flatten our activity over time so we can extract only neurons that have some activity

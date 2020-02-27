@@ -31,6 +31,61 @@ class RoverVision():
     def __init__(
             self, res, minibatch_size, spiking, dt,
             gain, gain_scale, seed, synapses, probe_neurons=False):
+        """
+        A keras converted network for locating a red ball in a mujoco generated image.
+        Returns the local error (x, y).
+
+        To extend this network with other nengo objects you will need to run the
+        extend_network() function. This creates an input node so you can manually
+        inject images into the network. You can then use the sim or net objects from
+        this class and extend them as desired.
+
+        Pass input images to vision.net.validation_images - this updates the input node
+        function
+        Get outputs by connecting to the vision.output node
+
+        vision = RoverVision(res=[32, 128], minibatch_size=10, spiking=True, dt=0.001
+            gain=1, gain_scale=500, seed=0, synapses=[None, None, None, 0.005],
+            probe_neurons=False)
+        vision.extend_network()
+
+        with vision.net as net:
+            def sim_fun(t, x):
+                # x is the vision prediction
+                # do something with the vision output
+                # update our input image
+                vision.net.validation_images = updated_image
+
+            ens = nengo.Ensemble(...)
+            nengo.Connection(vision.output, ens)
+
+        # update our sim with our extended net
+        sim = nengo.Simulator(vision.net)
+        sim.run(1e5)
+
+
+        Parameters
+        ----------
+        res: list of two ints
+            the resolution, in vertical by horizontal pixels, of the input images
+        minibatch_size: int
+            specifies how to break up the training batches.
+            NOTE: must be <= the batch_size
+        spiking: boolean
+            for inference only, switches between relu and spiking relu activations
+        dt: float
+            simulation time step
+        gain: int
+            gain set during training
+        gain_scale: int
+            scaling factor for spiking network to increase the amount of activity.
+            gain gets scaled by gain_scale and neuron amplitudes get set to 1/gain_scale
+        synapses: list of 4 floats or None's
+            synapses set on nengo connections
+        probe_neuron: boolean
+            toggles the nengo probe on the convolutional layer's neurons
+            NOTE: if you are running into OOM errors, try setting this to False
+        """
 
         self.dt = dt
         self.seed = seed
@@ -68,7 +123,6 @@ class RoverVision():
         if not self.spiking:
             converter = nengo_dl.Converter(
                 model,
-                #TODO: make sure swapping the activation here doesn't affect results
                 swap_activations={
                     tf.nn.relu: nengo.RectifiedLinear(amplitude=1/gain_scale)
                     }
@@ -85,6 +139,7 @@ class RoverVision():
         # IO objects
         self.vision_input = converter.inputs[keras_image_input]
         self.dense_output = converter.outputs[keras_dense_output]
+        self.output = converter.layer_map[keras_dense][0][0]
 
         # ensemble objects
         nengo_conv = converter.layer_map[conv1][0][0]
@@ -119,7 +174,6 @@ class RoverVision():
     def extend_net(self):
         # our input node function
         def send_image_in(t):
-            #TODO catch exception if validation images don't exist and warn user they
             # need to be set manually
             if self.net.count is not None:
                 # if passing in a list of images to run through one step at a time
@@ -145,15 +199,36 @@ class RoverVision():
 
     def train(
             self, images, targets, epochs, validation_images=None,
-            n_validation_steps=10, weights_loc=None, save_folder=None,
+            n_validation_steps=1, weights_loc=None, save_folder=None,
             validation_targets=None, num_pts=None):
         """
-        We loop through from epochs[0] to epochs[1], so if epochs[0]
+        We loop through from epochs[0] to epochs[1]. If epochs[0]
         is not 0 then this function assumes the weights to start
         with will be at '%s/epoch_%i' % (weights_loc, epoch-1)
 
-        In other words it is assumed that if our starting epoch is not
-        0 then we should be loading weights from the previous epoch
+        Saves validation prediction plots if validation data is passed in
+        (validation_images and targets)
+
+        Parameters
+        ----------
+        images: array of floats (flattened images)
+            shape (n_training_images, n_steps, subpixels)
+        targets: array of floats (flattened targets)
+            shape (n_training_targets, n_steps, target_dimensions)
+        epochs: list of ints
+            start and stop epochs
+        validation_images: array of floats (flattened images)
+            shape (n_validation_images, n_steps, subpixels)
+        validation_targets: array of floats (flattened targets)
+            shape (n_validation_targets, n_steps, target_dimensions)
+        n_validation_steps: int, Optional (Default: 1)
+            the number of steps to show each validation image for
+        weights_loc: string
+            location where to save and load epoch weights to / from
+        save_folder: string
+            location where to save figures of results
+        num_pts: int
+            number of steps to plot from the predictions
         """
         if validation_images is not None:
             validation_images_dict = {
@@ -203,6 +278,20 @@ class RoverVision():
 
 
     def predict(self, images, n_validation_steps, weights=None):
+        """
+        Runs through the images passed in with the nengo_dl.sim.predict() function
+        This has the option of running the simulation with batches depending on the
+        shape of images and minibatch_size
+
+        Parameters
+        ----------
+        images: array of floats (flattened images)
+            shape (n_training_images, n_steps, subpixels)
+        n_validation_steps: int, Optional (Default: 1)
+            the number of steps to show each validation image for
+        weights: string
+            location of weights file
+        """
         print('Running prediction for %i steps per image,  with images shape' % n_validation_steps, images.shape)
         # load a specific set of weights
         if weights is not None:
@@ -225,6 +314,19 @@ class RoverVision():
 
 
     def run(self, images, sim_steps, weights=None):
+        """
+        Runs through the images passed in with the nengo.sim.run() function
+
+        Parameters
+        ----------
+        images: array of floats (flattened images)
+            shape (n_training_images, n_steps, subpixels)
+        sim_steps: int, Optional (Default: 1)
+            the number of steps to run the sim for
+        weights: string
+            location of weights file
+        """
+
         # load a specific set of weights
         if weights is not None:
             with nengo_dl.Simulator(
@@ -438,7 +540,6 @@ if __name__ == '__main__':
     # if non-batched prediction using sim.run
     # the extend function gives you access to the input keras layer so you can inject data
     if mode == 'run':
-        print('VAL SHAPE: ', validation_images.shape)
         sim_steps = dt*n_validation_steps*n_validation
         data = vision.run(
             images=np.asarray(validation_images).squeeze(), sim_steps=sim_steps, weights=weights)
