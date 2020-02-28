@@ -1,5 +1,6 @@
 import nengo
 import nengo_dl
+import sys
 
 # import nengo_loihi
 import keras
@@ -112,7 +113,7 @@ class RoverVision:
             inputs=self.keras_image_input, outputs=self.keras_dense_output
         )
 
-    def convert(self, gain_scale, spiking=False, synapses=None):
+    def convert(self, gain_scale, spiking=False, synapses=None, probe_neurons=False):
         """
         gain_scale: int
             scaling factor for spiking network to increase the amount of activity.
@@ -205,7 +206,6 @@ class RoverVision:
         targets,
         epochs,
         validation_images=None,
-        n_validation_steps=1,
         weights_loc=None,
         save_folder=None,
         validation_targets=None,
@@ -231,8 +231,6 @@ class RoverVision:
             shape (n_validation_images, n_steps, subpixels)
         validation_targets: array of floats (flattened targets)
             shape (n_validation_targets, n_steps, target_dimensions)
-        n_validation_steps: int, Optional (Default: 1)
-            the number of steps to show each validation image for
         weights_loc: string
             location where to save and load epoch weights to / from
         save_folder: string
@@ -287,36 +285,22 @@ class RoverVision:
 
 
 if __name__ == "__main__":
+
+    mode = sys.argv[1]  # valid options are 'train', 'predict', and 'run'
+    if len(sys.argv) > 2:  # rate neurons are default
+        spiking = True if sys.argv[2] == 'spiking' else False
+    # check if gain / amplitude scaling is set, default is 1
+    gain_scale = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+
     # ------------ set test parameters
-    # mode = "predict"
-    mode = 'train'
-    # mode = 'run'
-    spiking = False
     dt = 0.001
     db_name = "rover_training_0004"
     res = [32, 128]
     n_training = 30000  # number of images to train on
     n_validation = 10  # number of validation images
+    n_validation_steps = 30
     seed = 0
-    probe_neurons = True
-
-    if spiking:
-        # typically for validation with spiking neurons
-        n_validation_steps = 300
-        n_training_steps = None  # should not train with spikes, throw an error
-        gain_scale = 1000
-        synapses = None  # [None, None, None, None] # 0.05]
-        weights = "epoch_29"
-        epochs = None
-    else:
-        # typically for training with rate neurons
-        n_validation_steps = 1
-        n_training_steps = 1
-        gain_scale = 1
-        synapses = None  # [None, None, None, None]
-        # weights = None
-        weights = "epoch_29"
-        epochs = [0, 30]
+    # probe_neurons = True
 
     # using baseline of 1ms timesteps to define n_steps
     # adjust based on dt to keep sim time constant
@@ -327,7 +311,6 @@ if __name__ == "__main__":
     minibatch_size = min(minibatch_size, n_validation)
 
     # plotting parameters
-    custom_save_tag = ""  # if you want to prepend some tag to saved images
     num_imgs_to_show = 10  # number of image predictions to show in the results plot
     num_imgs_to_show = min(num_imgs_to_show, n_validation)
     num_pts = num_imgs_to_show * n_validation_steps  # number of steps to plot
@@ -375,52 +358,20 @@ if __name__ == "__main__":
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
-    # Notes to save with this test
-    notes = """
-    \n- setting biases to non-trainable
-    \n- 32 filters
-    \n- bias off on all layer, loihi restriction
-    \n- default kernel initializers
-    \n- 1 conv layers 1 dense
-    \n- adding relu layer between input and conv1 due to loihi comm restriction
-    \n- changing image scaling from -1 to 1, to 0 to 1 due to loihi comm restriction
-    """
-
-    test_params = {
-        "spiking": spiking,
-        "dt": dt,
-        "n_validation_steps": n_validation_steps,
-        "n_training_steps": n_training_steps,
-        "gain_scale": gain_scale,
-        "synapses": synapses,
-        "starting_weights_loc": weights,
-        "epochs": epochs,
-        "n_training": n_training,
-        "n_validation": n_validation,
-        "res": res,
-        "minibatch_size": minibatch_size,
-        "seed": seed,
-        "notes": notes,
-        "probe_neurons": probe_neurons,
-    }
-
-    # Save our set up parameters
-    dat_results = DataHandler(db_name=save_db_name)
-    dat_results.save(
-        data=test_params, save_location="%s/params" % save_folder, overwrite=True
-    )
-
     # instantiate our keras converted network
     vision = RoverVision(
         res=res,
         minibatch_size=minibatch_size,
         dt=dt,
         seed=seed,
-        probe_neurons=probe_neurons,
+        # probe_neurons=probe_neurons,
     )
 
     # if training
     if mode == "train":
+
+        n_training_steps = 1
+        epochs = [0, 30]
 
         # prepare training data ------------------------------------
         try:
@@ -459,83 +410,120 @@ if __name__ == "__main__":
             data=training_targets, batch_data=True, n_steps=n_training_steps
         )
 
-        sim = vision.convert(gain_scale=gain_scale, spiking=False, synapses=None)
+        sim = vision.convert(gain_scale=1, spiking=False, synapses=None)
         vision.train(
             sim=sim,
             images=training_images,
             targets=training_targets,
             epochs=epochs,
             validation_images=validation_images,
-            n_validation_steps=n_validation_steps,
             weights_loc=save_folder,
             save_folder=save_folder,
             num_pts=num_pts,
             validation_targets=validation_targets,
         )
-    # if batched prediction
-    elif mode == "predict":
-        sim = vision.convert(gain_scale=gain_scale, spiking=spiking, synapses=synapses)
+    else:
 
-        # load a specific set of weights
-        if weights is not None:
-            print("Received specific weights to use: ", weights)
-            sim.load_params(weights)
+        synapses = None  # [None, None, None, 0.05]
+        weights = "epoch_29"
 
-        data = sim.predict(
-            {vision.vision_input: validation_images},
-            n_steps=validation_images.shape[1],
-            stateful=False
-        )
+        # if batched prediction
+        if mode == "predict":
+            sim = vision.convert(gain_scale=gain_scale, spiking=spiking, synapses=synapses)
 
-        dl_utils.plot_prediction_error(
-            predictions=np.asarray(data[vision.dense_output]),
-            target_vals=validation_targets,
-            save_folder=save_folder,
-            save_name="%s_prediction_error" % mode,
-            num_pts=num_pts,
-        )
-    # if non-batched prediction using sim.run in Nengo (not NengoDL)
-    # the extend function gives you access to the input keras layer so you can inject data
-    elif mode == "run":
-        sim = vision.convert(gain_scale=gain_scale, spiking=spiking, synapses=synapses)
+            # load a specific set of weights
+            if weights is not None:
+                print("Received specific weights to use: ", weights)
+                sim.load_params(weights)
 
-        # load a specific set of weights
-        if weights is not None:
-            sim.load_params(weights)
+            data = sim.predict(
+                {vision.vision_input: validation_images},
+                n_steps=validation_images.shape[1],
+                # stateful=False
+            )
 
-        # NOTE that the user will need to pass their input image to
-        # rover_vision.net.validation_images if using an external rover_vision.sim.run call
+            dl_utils.plot_prediction_error(
+                predictions=np.asarray(data[vision.dense_output]),
+                target_vals=validation_targets,
+                save_folder=save_folder,
+                save_name="%s_prediction_error" % mode,
+                num_pts=num_pts,
+            )
+        # if non-batched prediction using sim.run in Nengo (not NengoDL)
+        # the extend function gives you access to the input keras layer so you can inject data
+        elif mode == "run":
+            sim = vision.convert(gain_scale=gain_scale, spiking=spiking, synapses=synapses)
 
-        # we have to extend our network to be able to manually inject input images
-        # and to switch from the nengo_dl to the nengo simulator
-        vision.extend_net(net, validation_images)
+            # load a specific set of weights
+            if weights is not None:
+                sim.load_params(weights)
 
-        sim_steps = dt * n_validation_steps * n_validation
-        sim.run(sim_steps)
-        data = sim.data
+            # NOTE that the user will need to pass their input image to
+            # rover_vision.net.validation_images if using an external rover_vision.sim.run call
 
-        dl_utils.plot_prediction_error(
-            predictions=np.asarray(data[vision.dense_output]),
-            target_vals=validation_targets,
-            save_folder=save_folder,
-            save_name="%s_prediction_error" % mode,
-            num_pts=num_pts,
-        )
+            # we have to extend our network to be able to manually inject input images
+            # and to switch from the nengo_dl to the nengo simulator
+            vision.extend_net(net, validation_images)
 
-    if probe_neurons:
-        # pass in the input images so we can see the neural activity next to the input image
-        # since we repeat n_validation_steps times, just take the first column in the 2nd dim
-        images = validation_images.reshape(
-            (n_validation, n_validation_steps, res[0], res[1], 3)
-        )[:, 0, :, :, :].squeeze()
-        # skip showing the neurons next to images
-        images = None
+            sim_steps = dt * n_validation_steps * n_validation
+            sim.run(sim_steps)
+            data = sim.data
 
-        dl_utils.plot_neuron_activity(
-            activity=data[vision.neuron_probe],
-            num_pts=num_pts,
-            save_folder=save_folder,
-            save_name="%s_activity" % mode,
-            num_neurons_to_plot=100,
-            images=images,
-        )
+            dl_utils.plot_prediction_error(
+                predictions=np.asarray(data[vision.dense_output]),
+                target_vals=validation_targets,
+                save_folder=save_folder,
+                save_name="%s_prediction_error" % mode,
+                num_pts=num_pts,
+            )
+
+        # if probe_neurons:
+        #     # pass in the input images so we can see the neural activity next to the input image
+        #     # since we repeat n_validation_steps times, just take the first column in the 2nd dim
+        #     images = validation_images.reshape(
+        #         (n_validation, n_validation_steps, res[0], res[1], 3)
+        #     )[:, 0, :, :, :].squeeze()
+        #     # skip showing the neurons next to images
+        #     images = None
+        #
+        #     dl_utils.plot_neuron_activity(
+        #         activity=data[vision.neuron_probe],
+        #         num_pts=num_pts,
+        #         save_folder=save_folder,
+        #         save_name="%s_activity" % mode,
+        #         num_neurons_to_plot=100,
+        #         images=images,
+        #     )
+
+
+    # Notes to save with this test
+    notes = """
+    \n- setting biases to non-trainable
+    \n- 32 filters
+    \n- bias off on all layer, loihi restriction
+    \n- default kernel initializers
+    \n- 1 conv layers 1 dense
+    \n- adding relu layer between input and conv1 due to loihi comm restriction
+    \n- changing image scaling from -1 to 1, to 0 to 1 due to loihi comm restriction
+    """
+
+    test_params = {
+        "spiking": spiking,
+        "dt": dt,
+        "gain_scale": gain_scale,
+        "synapses": synapses,
+        "starting_weights_loc": weights,
+        "n_training": n_training,
+        "n_validation": n_validation,
+        "res": res,
+        "minibatch_size": minibatch_size,
+        "seed": seed,
+        "notes": notes,
+        # "probe_neurons": probe_neurons,
+    }
+
+    # Save our set up parameters
+    dat_results = DataHandler(db_name=save_db_name)
+    dat_results.save(
+        data=test_params, save_location="%s/params" % save_folder, overwrite=True
+    )
