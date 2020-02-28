@@ -91,8 +91,7 @@ class RoverVision:
             shape=(res[0], res[1], 3), batch_size=self.minibatch_size
         )
 
-        self.relu_layer = tf.keras.layers.Activation(tf.nn.relu)
-        relu_out = self.relu_layer(self.keras_image_input)
+        self.relu1 = tf.keras.layers.Activation(tf.nn.relu)(self.keras_image_input)
 
         self.conv1 = tf.keras.layers.Conv2D(
             filters=32,
@@ -101,16 +100,14 @@ class RoverVision:
             use_bias=False,
             activation=tf.nn.relu,
             data_format="channels_last",
-        )
-        conv1_out = self.conv1(relu_out)
+        )(self.relu1)
 
-        flatten = tf.keras.layers.Flatten()(conv1_out)
+        flatten = tf.keras.layers.Flatten()(self.conv1)
 
-        self.keras_dense = tf.keras.layers.Dense(units=2, use_bias=False)
-        self.keras_dense_output = self.keras_dense(flatten)
+        self.keras_dense = tf.keras.layers.Dense(units=2, use_bias=False)(flatten)
 
         self.model = tf.keras.Model(
-            inputs=self.keras_image_input, outputs=self.keras_dense_output
+            inputs=self.keras_image_input, outputs=self.keras_dense
         )
 
     def convert(self, gain_scale, spiking=False, synapses=None, probe_neurons=False):
@@ -129,36 +126,30 @@ class RoverVision:
 
         converter = nengo_dl.Converter(
             self.model,
-            swap_activations={tf.nn.relu: activation(amplitude=1 / gain_scale)},
+            swap_activations={tf.nn.relu: activation()},
+            scale_firing_rates=gain_scale,
         )
 
-        # create references to some nengo objects in the network
-        # IO objects
+        # create references to some nengo objects in the network IO objects
         self.vision_input = converter.inputs[self.keras_image_input]
-        self.dense_output = converter.outputs[self.keras_dense_output]
-        self.output = converter.layer_map[self.keras_dense][0][0]
-
-        # ensemble objects
-        nengo_conv = converter.layer_map[self.conv1][0][0]
-        nengo_relu = converter.layer_map[self.relu_layer][0][0]
-
-        # adjust ensemble gains
-        nengo_conv.ensemble.gain = nengo.dists.Choice([gain_scale])
-        nengo_relu.ensemble.gain = nengo.dists.Choice([gain_scale])
+        self.dense_output = converter.outputs[self.keras_dense]
 
         net = converter.net
+
+        nengo_relu1 = converter.layers[self.relu1]
+        nengo_conv1 = converter.layers[self.conv1]
+
+        nengo_relu1.ensemble.gain = nengo.dists.Choice([gain_scale])
+        nengo_conv1.ensemble.gain = nengo.dists.Choice([gain_scale])
 
         with net:
             # NOTE to avoid OOM errors, only have one neuron probe set at a time
             if probe_neurons:
-                self.neuron_probe = nengo.Probe(
-                    nengo_conv.ensemble.neurons
-                )  # [:20000])
-                # self.neuron_probe = nengo.Probe(nengo_relu.ensemble.neurons)
+                self.neuron_probe = nengo.Probe(nengo_conv1)
 
             # set our biases to non-trainable to make sure they're always 0
-            net.config[nengo_conv.ensemble.neurons].trainable = False
-            net.config[nengo_relu.ensemble.neurons].trainable = False
+            net.config[nengo_relu1].trainable = False
+            net.config[nengo_conv1].trainable = False
 
         # set our synapses
         if synapses is not None:
@@ -287,8 +278,8 @@ class RoverVision:
 if __name__ == "__main__":
 
     mode = sys.argv[1]  # valid options are 'train', 'predict', and 'run'
-    if len(sys.argv) > 2:  # rate neurons are default
-        spiking = True if sys.argv[2] == 'spiking' else False
+    # rate neurons are default
+    spiking = (sys.argv[2] == 'spiking') if len(sys.argv) > 2 else False
     # check if gain / amplitude scaling is set, default is 1
     gain_scale = int(sys.argv[3]) if len(sys.argv) > 3 else 1
 
@@ -297,7 +288,7 @@ if __name__ == "__main__":
     db_name = "rover_training_0004"
     res = [32, 128]
     n_training = 30000  # number of images to train on
-    n_validation = 10  # number of validation images
+    n_validation = 2  # number of validation images
     n_validation_steps = 30
     seed = 0
     # probe_neurons = True
@@ -316,22 +307,32 @@ if __name__ == "__main__":
     num_pts = num_imgs_to_show * n_validation_steps  # number of steps to plot
 
     # ------------ load and prepare our data
-    # load our raw data
-    validation_images, validation_targets = dl_utils.load_data(
-        db_name=db_name, label="validation_0000", n_imgs=n_validation
-    )
+    try:
+        processed_data = np.load('/home/tdewolf/Downloads/validation_images_processed.npz')
+        validation_images = processed_data['images']
+        validation_targets = processed_data['targets']
+    except:
+        # load our raw data
+        validation_images, validation_targets = dl_utils.load_data(
+            db_name=db_name, label="validation_0000", n_imgs=n_validation
+        )
 
-    # our saved targets are 3D but we only care about x and y
-    valiation_targets = validation_targets[:, 0:2]
+        # our saved targets are 3D but we only care about x and y
+        valiation_targets = validation_targets[:, 0:2]
 
-    # do our resizing, scaling, and flattening
-    validation_images = dl_utils.preprocess_images(
-        image_data=validation_images,
-        show_resized_image=False,
-        flatten=True,
-        normalize=True,
-        res=res,
-    )
+        # do our resizing, scaling, and flattening
+        validation_images = dl_utils.preprocess_images(
+            image_data=validation_images,
+            show_resized_image=False,
+            flatten=True,
+            normalize=True,
+            res=res,
+        )
+        np.savez_compressed(
+            '/home/tdewolf/Downloads/validation_images_processed',
+            images=validation_images,
+            targets=validation_targets,
+        )
 
     # we have to set the minibatch_size when instantiating the network so if we want
     # to run sim.predict after each training session to track progress, we need to have
@@ -375,7 +376,7 @@ if __name__ == "__main__":
 
         # prepare training data ------------------------------------
         try:
-            processed_data = np.load('training_images_processed.npz')
+            processed_data = np.load('/home/tdewolf/Downloads/training_images_processed.npz')
             training_images = processed_data['images']
             training_targets = processed_data['targets']
             print('Processed training images loaded from file...')
@@ -397,7 +398,7 @@ if __name__ == "__main__":
                 res=res,
             )
             np.savez_compressed(
-                'training_images_processed',
+                '/home/tdewolf/Downloads/training_images_processed',
                 images=training_images,
                 targets=training_targets
             )
@@ -422,42 +423,62 @@ if __name__ == "__main__":
             num_pts=num_pts,
             validation_targets=validation_targets,
         )
+
+        # Notes to save with this test
+        notes = """
+        \n- setting biases to non-trainable
+        \n- 32 filters
+        \n- bias off on all layer, loihi restriction
+        \n- default kernel initializers
+        \n- 1 conv layers 1 dense
+        \n- adding relu layer between input and conv1 due to loihi comm restriction
+        \n- changing image scaling from -1 to 1, to 0 to 1 due to loihi comm restriction
+        """
+
+        test_params = {
+            "dt": dt,
+            "gain_scale": gain_scale,
+            "starting_weights_loc": weights,
+            "n_training": n_training,
+            "n_validation": n_validation,
+            "res": res,
+            "minibatch_size": minibatch_size,
+            "seed": seed,
+            "notes": notes,
+            "epochs": epochs,
+            # "probe_neurons": probe_neurons,
+        }
+
+        # Save our set up parameters
+        dat_results = DataHandler(db_name=save_db_name)
+        dat_results.save(
+            data=test_params, save_location="%s/params" % save_folder, overwrite=True
+        )
+
     else:
 
         synapses = None  # [None, None, None, 0.05]
-        weights = "epoch_29"
+        weights = "data/rover_training_0004/test/test_1/epoch_29"
+
+        sim = vision.convert(gain_scale=gain_scale, spiking=spiking, synapses=synapses)
+
+        # load a specific set of weights
+        if weights is not None:
+            print("Received specific weights to use: ", weights)
+            sim.load_params(weights)
 
         # if batched prediction
         if mode == "predict":
-            sim = vision.convert(gain_scale=gain_scale, spiking=spiking, synapses=synapses)
-
-            # load a specific set of weights
-            if weights is not None:
-                print("Received specific weights to use: ", weights)
-                sim.load_params(weights)
-
             data = sim.predict(
                 {vision.vision_input: validation_images},
                 n_steps=validation_images.shape[1],
                 # stateful=False
             )
 
-            dl_utils.plot_prediction_error(
-                predictions=np.asarray(data[vision.dense_output]),
-                target_vals=validation_targets,
-                save_folder=save_folder,
-                save_name="%s_prediction_error" % mode,
-                num_pts=num_pts,
-            )
         # if non-batched prediction using sim.run in Nengo (not NengoDL)
         # the extend function gives you access to the input keras layer so you can inject data
         elif mode == "run":
-            sim = vision.convert(gain_scale=gain_scale, spiking=spiking, synapses=synapses)
-
-            # load a specific set of weights
-            if weights is not None:
-                sim.load_params(weights)
-
+            raise Exception('Not properly implemented yet')
             # NOTE that the user will need to pass their input image to
             # rover_vision.net.validation_images if using an external rover_vision.sim.run call
 
@@ -469,13 +490,14 @@ if __name__ == "__main__":
             sim.run(sim_steps)
             data = sim.data
 
-            dl_utils.plot_prediction_error(
-                predictions=np.asarray(data[vision.dense_output]),
-                target_vals=validation_targets,
-                save_folder=save_folder,
-                save_name="%s_prediction_error" % mode,
-                num_pts=num_pts,
-            )
+        dl_utils.plot_prediction_error(
+            predictions=np.asarray(data[vision.dense_output]),
+            target_vals=validation_targets,
+            save_folder=save_folder,
+            save_name="%s_prediction_error" % mode,
+            num_pts=num_pts,
+            show_plot=True,
+        )
 
         # if probe_neurons:
         #     # pass in the input images so we can see the neural activity next to the input image
@@ -494,36 +516,3 @@ if __name__ == "__main__":
         #         num_neurons_to_plot=100,
         #         images=images,
         #     )
-
-
-    # Notes to save with this test
-    notes = """
-    \n- setting biases to non-trainable
-    \n- 32 filters
-    \n- bias off on all layer, loihi restriction
-    \n- default kernel initializers
-    \n- 1 conv layers 1 dense
-    \n- adding relu layer between input and conv1 due to loihi comm restriction
-    \n- changing image scaling from -1 to 1, to 0 to 1 due to loihi comm restriction
-    """
-
-    test_params = {
-        "spiking": spiking,
-        "dt": dt,
-        "gain_scale": gain_scale,
-        "synapses": synapses,
-        "starting_weights_loc": weights,
-        "n_training": n_training,
-        "n_validation": n_validation,
-        "res": res,
-        "minibatch_size": minibatch_size,
-        "seed": seed,
-        "notes": notes,
-        # "probe_neurons": probe_neurons,
-    }
-
-    # Save our set up parameters
-    dat_results = DataHandler(db_name=save_db_name)
-    dat_results.save(
-        data=test_params, save_location="%s/params" % save_folder, overwrite=True
-    )
