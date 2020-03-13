@@ -167,7 +167,7 @@ def load_data(db_name, label='training_0000', n_imgs=None):
 # very long function for plotting results and debugging fun
 def plot_prediction_error(
         predictions, target_vals, num_pts,
-        save_folder='', save_name='prediction_results'):
+        save_folder='', save_name='prediction_results', show_plot=False):
     """
     Accepts predictions and targets, plots the x and y error, along with the target location
 
@@ -203,22 +203,25 @@ def plot_prediction_error(
     x_err = np.linalg.norm(target_vals[:, 0] - predictions[:, 0])
     y_err = np.linalg.norm(target_vals[:, 1] - predictions[:, 1])
 
-
     fig = plt.Figure()
-    x = np.linspace(0, len(predictions[-num_pts:]), len(predictions[-num_pts:]))
+    x = np.arange(predictions.shape[0])
 
     # plot our X predictions
     plt.subplot(311)
     plt.title('X: %.3f' % x_err)
-    plt.plot(x, predictions[-num_pts:, 0], label='predictions', color='k', linestyle='--')
-    plt.plot(x, target_vals[-num_pts:, 0], label='target', color='r')
+    plt.plot(x, predictions[:, 0], label='predictions', color='k', linestyle='--')
+    plt.plot(x, target_vals[:, 0], label='target', color='r')
+    # plt.plot(x, predictions[-num_pts:, 0], label='predictions', color='k', linestyle='--')
+    # plt.plot(x, target_vals[-num_pts:, 0], label='target', color='r')
     plt.legend()
 
     # plot our Y predictions
     plt.subplot(312)
     plt.title('Y: %.3f' % y_err)
-    plt.plot(x, predictions[-num_pts:, 1], label='predictions', color='k', linestyle='--')
-    plt.plot(x, target_vals[-num_pts:, 1], label='target', color='r')
+    plt.plot(x, predictions[:, 1], label='predictions', color='k', linestyle='--')
+    plt.plot(x, target_vals[:, 1], label='target', color='r')
+    # plt.plot(x, predictions[-num_pts:, 1], label='predictions', color='k', linestyle='--')
+    # plt.plot(x, target_vals[-num_pts:, 1], label='target', color='r')
     plt.legend()
 
     # plot our targets in the xy plane to get an idea of their coverage range
@@ -228,12 +231,18 @@ def plot_prediction_error(
     plt.ylim([-3, 3])
     plt.scatter(0, 0, color='r', label='rover', s=2)
     plt.scatter(
-        target_vals[-num_pts:, 0],
-        target_vals[-num_pts:, 1], label='target', s=1)
+        target_vals,
+        target_vals, label='target', s=1)
+        # target_vals[-num_pts:, 0],
+        # target_vals[-num_pts:, 1], label='target', s=1)
     plt.legend()
     plt.tight_layout()
     plt.savefig('%s/%s.png' % (save_folder, save_name))
     print('Saving prediction results to %s/%s.png' % (save_folder, save_name))
+
+    if show_plot:
+        plt.show()
+
     plt.close()
 
 
@@ -310,7 +319,7 @@ def plot_neuron_activity(
     t = np.arange(0, num_pts, 1)
 
     # rasterplot of our neural activity for a subset of neurons
-    plt.figure()
+    plt.figure(figsize=(10, 30))
     plt.subplot(111)
     rasterplot(t, activity_to_plot)
     plt.tight_layout()

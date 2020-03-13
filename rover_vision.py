@@ -87,11 +87,11 @@ class RoverVision:
         self.minibatch_size = minibatch_size
 
         # Define our keras network
-        self.keras_image_input = tf.keras.Input(
+        self.input = tf.keras.Input(
             shape=(res[0], res[1], 3), batch_size=self.minibatch_size
         )
 
-        self.relu1 = tf.keras.layers.Activation(tf.nn.relu)(self.keras_image_input)
+        self.relu1 = tf.keras.layers.Activation(tf.nn.relu)(self.input)
 
         self.conv1 = tf.keras.layers.Conv2D(
             filters=32,
@@ -102,13 +102,11 @@ class RoverVision:
             data_format="channels_last",
         )(self.relu1)
 
-        flatten = tf.keras.layers.Flatten()(self.conv1)
+        flatten1 = tf.keras.layers.Flatten()(self.conv1)
 
-        self.keras_dense = tf.keras.layers.Dense(units=2, use_bias=False)(flatten)
+        self.dense1 = tf.keras.layers.Dense(units=2, use_bias=False)(flatten1)
 
-        self.model = tf.keras.Model(
-            inputs=self.keras_image_input, outputs=self.keras_dense
-        )
+        self.model = tf.keras.Model(inputs=self.input, outputs=self.dense1)
 
     def convert(self, gain_scale, spiking=False, synapses=None, probe_neurons=False):
         """
@@ -131,32 +129,29 @@ class RoverVision:
         )
 
         # create references to some nengo objects in the network IO objects
-        self.vision_input = converter.inputs[self.keras_image_input]
-        self.dense_output = converter.outputs[self.keras_dense]
+        self.nengo_input = converter.inputs[self.input]
+        self.nengo_dense1 = converter.outputs[self.dense1]
 
         net = converter.net
 
         nengo_relu1 = converter.layers[self.relu1]
         nengo_conv1 = converter.layers[self.conv1]
 
-        nengo_relu1.ensemble.gain = nengo.dists.Choice([gain_scale])
-        nengo_conv1.ensemble.gain = nengo.dists.Choice([gain_scale])
-
         with net:
-            # NOTE to avoid OOM errors, only have one neuron probe set at a time
-            if probe_neurons:
-                self.neuron_probe = nengo.Probe(nengo_conv1)
-
             # set our biases to non-trainable to make sure they're always 0
             net.config[nengo_relu1].trainable = False
             net.config[nengo_conv1].trainable = False
+
+            # set up probes so that we can add the firing rates to the cost function
+            self.probe_relu1 = nengo.Probe(nengo_relu1, label='probe_relu1')
+            self.probe_conv1 = nengo.Probe(nengo_conv1, label='probe_conv1')
 
         # set our synapses
         if synapses is not None:
             for cc, conn in enumerate(net.all_connections):
                 conn.synapse = synapses[cc]
                 print("Setting synapse to %s on " % str(synapses[cc]), conn)
-            self.dense_output.synapse = synapses[3]
+            self.nengo_dense1.synapse = synapses[3]
             print("Setting synapse to %s on output probe" % str(synapses[3]))
 
         sim = nengo_dl.Simulator(
@@ -185,7 +180,7 @@ class RoverVision:
             # create out input node
             image_input_node = nengo.Node(send_image_in, size_out=self.subpixels)
             self.input_probe = nengo.Probe(image_input_node)
-            nengo.Connection(image_input_node, self.vision_input, synapse=None)
+            nengo.Connection(image_input_node, self.nengo_input, synapse=None)
 
         # overwrite the nengo_dl simulator with the nengo simulator
         sim = nengo.Simulator(net, dt=self.dt)
@@ -230,13 +225,23 @@ class RoverVision:
             number of steps to plot from the predictions
         """
         if validation_images is not None:
-            validation_images_dict = {self.vision_input: validation_images}
-        training_images_dict = {self.vision_input: images}
+            validation_images_dict = {self.nengo_input: validation_images}
+
+        def put_in_range(x, y, weight=0, min=200, max=300):
+            assert len(y.shape) == 3
+            index_greater = (y > max)
+            index_lesser = (y < min)
+            error = tf.reduce_sum(y[index_greater] - max) + tf.reduce_sum(min - y[index_lesser])
+            return weight * error
 
         with sim:
             sim.compile(
-                optimizer=tf.optimizers.RMSprop(0.001),
-                loss={self.dense_output: tf.losses.mse},
+                optimizer=tf.optimizers.RMSprop(0.00001),
+                loss={
+                    self.nengo_dense1: tf.losses.mse,
+                    # self.probe_relu1: put_in_range,
+                    # self.probe_conv1: put_in_range,
+                },
             )
 
             for epoch in range(epochs[0], epochs[1]):
@@ -250,7 +255,13 @@ class RoverVision:
                     sim.load_params(prev_params_loc)
 
                 print("fitting data...")
-                sim.fit(training_images_dict, targets, epochs=1)
+                sim.fit(
+                    {self.nengo_input: training_images},
+                    {
+                        self.nengo_dense1: targets,
+                        # self.probe_relu1: np.zeros(targets.shape),
+                        # self.probe_conv1: np.zeros(targets.shape),
+                    }, epochs=1)
 
                 current_params_loc = "%s/epoch_%i" % (weights_loc, epoch)
                 print("saving network parameters to %s" % current_params_loc)
@@ -267,7 +278,7 @@ class RoverVision:
                 # TODO fix plotting NEED access to num_pts
 
                 dl_utils.plot_prediction_error(
-                    predictions=np.asarray(data[vision.dense_output]),
+                    predictions=np.asarray(data[vision.nengo_dense1]),
                     target_vals=validation_targets,
                     save_folder=save_folder,
                     save_name="validation_error_epoch_%i" % epoch,
@@ -288,7 +299,7 @@ if __name__ == "__main__":
     db_name = "rover_training_0004"
     res = [32, 128]
     n_training = 30000  # number of images to train on
-    n_validation = 2  # number of validation images
+    n_validation = 10  # number of validation images
     n_validation_steps = 30
     seed = 0
     # probe_neurons = True
@@ -297,7 +308,7 @@ if __name__ == "__main__":
     # adjust based on dt to keep sim time constant
     n_validation_steps = int(n_validation_steps * 0.001 / dt)
 
-    minibatch_size = 10 if mode == "train" else 1
+    minibatch_size = 300 if mode == "train" else 1
     # can't have a minibatch larger than our number of images
     minibatch_size = min(minibatch_size, n_validation)
 
@@ -325,7 +336,7 @@ if __name__ == "__main__":
             image_data=validation_images,
             show_resized_image=False,
             flatten=True,
-            normalize=True,
+            normalize=False,
             res=res,
         )
         np.savez_compressed(
@@ -372,7 +383,7 @@ if __name__ == "__main__":
     if mode == "train":
 
         n_training_steps = 1
-        epochs = [0, 30]
+        epochs = [70, 80]
 
         # prepare training data ------------------------------------
         try:
@@ -394,7 +405,7 @@ if __name__ == "__main__":
                 image_data=training_images,
                 show_resized_image=False,
                 flatten=True,
-                normalize=True,
+                normalize=False,
                 res=res,
             )
             np.savez_compressed(
@@ -438,7 +449,6 @@ if __name__ == "__main__":
         test_params = {
             "dt": dt,
             "gain_scale": gain_scale,
-            "starting_weights_loc": weights,
             "n_training": n_training,
             "n_validation": n_validation,
             "res": res,
@@ -458,7 +468,7 @@ if __name__ == "__main__":
     else:
 
         synapses = None  # [None, None, None, 0.05]
-        weights = "data/rover_training_0004/test/test_1/epoch_29"
+        weights = "data/rover_training_0004/test/test_1/epoch_73"
 
         sim = vision.convert(gain_scale=gain_scale, spiking=spiking, synapses=synapses)
 
@@ -470,7 +480,7 @@ if __name__ == "__main__":
         # if batched prediction
         if mode == "predict":
             data = sim.predict(
-                {vision.vision_input: validation_images},
+                {vision.nengo_input: validation_images},
                 n_steps=validation_images.shape[1],
                 # stateful=False
             )
@@ -491,7 +501,7 @@ if __name__ == "__main__":
             data = sim.data
 
         dl_utils.plot_prediction_error(
-            predictions=np.asarray(data[vision.dense_output]),
+            predictions=np.asarray(data[vision.nengo_dense1]),
             target_vals=validation_targets,
             save_folder=save_folder,
             save_name="%s_prediction_error" % mode,
