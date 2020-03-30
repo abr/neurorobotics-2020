@@ -152,8 +152,8 @@ class RoverVision:
             net.config[nengo_conv2].trainable = False
 
             # set up probes so that we can add the firing rates to the cost function
-            self.probe_conv1 = nengo.Probe(nengo_conv1, label='probe_conv1')
-            self.probe_conv2 = nengo.Probe(nengo_conv2, label='probe_conv2')
+            self.probe_conv1 = nengo.Probe(nengo_conv1, label="probe_conv1")
+            self.probe_conv2 = nengo.Probe(nengo_conv2, label="probe_conv2")
 
         # set our synapses
         if synapses is not None:
@@ -173,7 +173,7 @@ class RoverVision:
         def send_image_in(t):
             # if updating an image over time, like rendering from a simulator
             # then we update this object each time
-            return self.image_input[0, int(t/0.001) - 1]
+            return self.image_input[0, int(t / 0.001) - 1]
 
         # if not using nengo dl we have to use a sim.run function
         # create a node so we can inject data into the network
@@ -256,13 +256,15 @@ class RoverVision:
                     sim.load_params(prev_params_loc)
 
                 print("using learning rate scheduler...")
+
                 def scheduler(epoch):
                     if epoch < 2:
                         return 0.001
                     else:
                         lr = 0.0001 * tf.math.exp(0.1 * (2 - epoch))
-                        print('Learning rate: ', lr)
+                        print("Learning rate: ", lr)
                         return lr
+
                 lr_scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
 
                 print("fitting data...")
@@ -270,7 +272,7 @@ class RoverVision:
                     training_images,
                     training_targets,
                     epochs=1,
-                    callbacks=[lr_scheduler]
+                    callbacks=[lr_scheduler],
                 )
 
                 current_params_loc = "%s/epoch_%i" % (save_folder, epoch)
@@ -299,16 +301,17 @@ class RoverVision:
 if __name__ == "__main__":
 
     mode = sys.argv[1]
-    assert mode in ['train', 'predict', 'run']
+    assert mode in ["train", "predict", "run"]
 
     activations = {
-        'relu': nengo.RectifiedLinear(),
-        'srelu': nengo.SpikingRectifiedLinear(),
-        'lif': nengo.LIF(),
-        'loihirelu': nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),#amplitude),
-        'loihirelunoise': nengo_loihi.neurons.LoihiSpikingRectifiedLinear(
-            nengo_dl_noise=nengo_loihi.neurons.LowpassRCNoise(0.001)),
-        'loihilif': nengo_loihi.neurons.LoihiLIF(),
+        "relu": nengo.RectifiedLinear(),
+        "srelu": nengo.SpikingRectifiedLinear(),
+        "lif": nengo.LIF(),
+        "loihirelu": nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),  # amplitude),
+        "loihirelunoise": nengo_loihi.neurons.LoihiSpikingRectifiedLinear(
+            nengo_dl_noise=nengo_loihi.neurons.LowpassRCNoise(0.001)
+        ),
+        "loihilif": nengo_loihi.neurons.LoihiLIF(),
     }
 
     # rate neurons are default
@@ -325,7 +328,7 @@ if __name__ == "__main__":
 
     use_dl_rate = False
     if len(sys.argv) > 4:
-        use_dl_rate = sys.argv[4] == 'use_dl_rate'
+        use_dl_rate = sys.argv[4] == "use_dl_rate"
 
     # ------------ set test parameters
     dt = 0.001
@@ -350,9 +353,11 @@ if __name__ == "__main__":
 
     # ------------ load and prepare our data
     try:
-        processed_data = np.load('/home/tdewolf/Downloads/validation_images_processed.npz')
-        validation_images = processed_data['images']
-        validation_targets = processed_data['targets']
+        processed_data = np.load(
+            "/home/tdewolf/Downloads/validation_images_processed.npz"
+        )
+        validation_images = processed_data["images"]
+        validation_targets = processed_data["targets"]
     except:
         # load our raw data
         validation_images, validation_targets = dl_utils.load_data(
@@ -371,7 +376,7 @@ if __name__ == "__main__":
             res=res,
         )
         np.savez_compressed(
-            '/home/tdewolf/Downloads/validation_images_processed',
+            "/home/tdewolf/Downloads/validation_images_processed",
             images=validation_images,
             targets=validation_targets,
         )
@@ -397,7 +402,11 @@ if __name__ == "__main__":
     group_name = activation_name  # helps to define what this group of tests is doing
     test_name = str(gain_scale)
     # for saving figures and weights
-    save_folder = "/home/tdewolf/Downloads/data/%s/%s/%s" % (db_name, group_name, test_name)
+    save_folder = "/home/tdewolf/Downloads/data/%s/%s/%s" % (
+        db_name,
+        group_name,
+        test_name,
+    )
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
@@ -418,12 +427,14 @@ if __name__ == "__main__":
 
         # prepare training data ------------------------------------
         try:
-            processed_data = np.load('/home/tdewolf/Downloads/training_images_processed.npz')
-            training_images = processed_data['images']
-            training_targets = processed_data['targets']
-            print('Processed training images loaded from file...')
+            processed_data = np.load(
+                "/home/tdewolf/Downloads/training_images_processed.npz"
+            )
+            training_images = processed_data["images"]
+            training_targets = processed_data["targets"]
+            print("Processed training images loaded from file...")
         except:
-            print('Processed training images not found, generating...')
+            print("Processed training images not found, generating...")
             # load raw data
             training_images, training_targets = dl_utils.load_data(
                 db_name=db_name, label="training_0000", n_imgs=n_training
@@ -440,9 +451,9 @@ if __name__ == "__main__":
                 res=res,
             )
             np.savez_compressed(
-                '/home/tdewolf/Downloads/training_images_processed',
+                "/home/tdewolf/Downloads/training_images_processed",
                 images=training_images,
-                targets=training_targets
+                targets=training_targets,
             )
 
         # repeat and batch our data
@@ -453,7 +464,9 @@ if __name__ == "__main__":
             data=training_targets, batch_data=True, n_steps=n_training_steps
         )
 
-        sim, net = vision.convert(gain_scale=gain_scale, activation=activation, synapses=None)
+        sim, net = vision.convert(
+            gain_scale=gain_scale, activation=activation, synapses=None
+        )
         vision.train(
             sim=sim,
             images=training_images,
@@ -476,7 +489,6 @@ if __name__ == "__main__":
         \n- first conv layer runs off chip
         \n- changing image scaling from -1 to 1, to 0 to 1 due to loihi comm restriction
         """
-
 
         test_params = {
             "dt": dt,
@@ -512,9 +524,7 @@ if __name__ == "__main__":
 
         with tf.keras.backend.learning_phase_scope(1) if use_dl_rate else nullcontext():
             sim, net = vision.convert(
-                gain_scale=gain_scale,
-                activation=activation,
-                synapses=synapses,
+                gain_scale=gain_scale, activation=activation, synapses=synapses,
             )
 
             # load a specific set of weights
@@ -527,14 +537,14 @@ if __name__ == "__main__":
                 data = sim.predict(
                     {vision.nengo_input: validation_images},
                     n_steps=validation_images.shape[1],
-                    stateful=False
+                    stateful=False,
                 )
 
             # if non-batched prediction using sim.run in Nengo (not NengoDL)
             # the extend function gives you access to the input keras layer so you can inject data
             elif mode == "run":
                 # net = sim.model.toplevel
-                print('Trying to freeze')
+                print("Trying to freeze")
                 with sim:
                     sim.freeze_params(net)
                 # if we want to run this in Nengo and not Nengo DL
@@ -550,8 +560,8 @@ if __name__ == "__main__":
                 sim.run(sim_steps)
                 data = sim.data
 
-            print('data shape: ', data[vision.nengo_dense1].shape)
-            print('vvalidation targets size: ', validation_targets.shape)
+            print("data shape: ", data[vision.nengo_dense1].shape)
+            print("vvalidation targets size: ", validation_targets.shape)
             dl_utils.plot_prediction_error(
                 predictions=np.asarray(data[vision.nengo_dense1]),
                 target_vals=validation_targets,
