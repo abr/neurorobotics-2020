@@ -41,7 +41,7 @@ nengo_loihi.builder.nengo_dl.install_dl_builders()
 
 
 class RoverVision:
-    def __init__(self, res, minibatch_size, dt, seed, probe_neurons=False):
+    def __init__(self, res, minibatch_size, dt, seed):
         """
         A keras converted network for locating a red ball in a mujoco generated image.
         Returns the local error (x, y).
@@ -55,8 +55,7 @@ class RoverVision:
         function
         Get outputs by connecting to the vision.output node
 
-        vision = RoverVision(res=[32, 128], minibatch_size=10, dt=0.001
-            seed=0, probe_neurons=False)
+        vision = RoverVision(res=[32, 128], minibatch_size=10, dt=0.001, seed=0)
         vision.extend_network()
 
         with vision.net as net:
@@ -122,7 +121,7 @@ class RoverVision:
 
         self.model = tf.keras.Model(inputs=self.input, outputs=self.dense1)
 
-    def convert(self, gain_scale, activation, synapses=None, probe_neurons=False):
+    def convert(self, gain_scale, activation, synapses=None):
         """
         gain_scale: int
             scaling factor for spiking network to increase the amount of activity.
@@ -173,7 +172,7 @@ class RoverVision:
         def send_image_in(t):
             # if updating an image over time, like rendering from a simulator
             # then we update this object each time
-            return self.image_input[0, int(t / 0.001) - 1]
+            return self.image_input[int(t / 0.001) - 1]
 
         # if not using nengo dl we have to use a sim.run function
         # create a node so we can inject data into the network
@@ -307,7 +306,7 @@ if __name__ == "__main__":
         "relu": nengo.RectifiedLinear(),
         "srelu": nengo.SpikingRectifiedLinear(),
         "lif": nengo.LIF(),
-        "loihirelu": nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),  # amplitude),
+        "loihirelu": nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
         "loihirelunoise": nengo_loihi.neurons.LoihiSpikingRectifiedLinear(
             nengo_dl_noise=nengo_loihi.neurons.LowpassRCNoise(0.001)
         ),
@@ -338,7 +337,7 @@ if __name__ == "__main__":
     n_validation = 50  # number of validation images
     n_validation_steps = 30
     seed = 0
-    # probe_neurons = True
+    data_dir = "/home/tdewolf/Downloads"
 
     # using baseline of 1ms timesteps to define n_steps
     # adjust based on dt to keep sim time constant
@@ -353,9 +352,7 @@ if __name__ == "__main__":
 
     # ------------ load and prepare our data
     try:
-        processed_data = np.load(
-            "/home/tdewolf/Downloads/validation_images_processed.npz"
-        )
+        processed_data = np.load("%s/validation_images_processed.npz" % data_dir)
         validation_images = processed_data["images"]
         validation_targets = processed_data["targets"]
     except:
@@ -376,7 +373,7 @@ if __name__ == "__main__":
             res=res,
         )
         np.savez_compressed(
-            "/home/tdewolf/Downloads/validation_images_processed",
+            "%s/validation_images_processed" % data_dir,
             images=validation_images,
             targets=validation_targets,
         )
@@ -402,24 +399,13 @@ if __name__ == "__main__":
     group_name = activation_name  # helps to define what this group of tests is doing
     test_name = str(gain_scale)
     # for saving figures and weights
-    save_folder = "/home/tdewolf/Downloads/data/%s/%s/%s" % (
-        db_name,
-        group_name,
-        test_name,
-    )
+    save_folder = "%s/data/%s/%s/%s" % (data_dir, db_name, group_name, test_name,)
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
     # instantiate our keras converted network
-    vision = RoverVision(
-        res=res,
-        minibatch_size=minibatch_size,
-        dt=dt,
-        seed=seed,
-        # probe_neurons=probe_neurons,
-    )
+    vision = RoverVision(res=res, minibatch_size=minibatch_size, dt=dt, seed=seed,)
 
-    # if training
     if mode == "train":
 
         n_training_steps = 1
@@ -427,9 +413,7 @@ if __name__ == "__main__":
 
         # prepare training data ------------------------------------
         try:
-            processed_data = np.load(
-                "/home/tdewolf/Downloads/training_images_processed.npz"
-            )
+            processed_data = np.load("%s/training_images_processed.npz" % data_dir)
             training_images = processed_data["images"]
             training_targets = processed_data["targets"]
             print("Processed training images loaded from file...")
@@ -451,7 +435,7 @@ if __name__ == "__main__":
                 res=res,
             )
             np.savez_compressed(
-                "/home/tdewolf/Downloads/training_images_processed",
+                "%s/training_images_processed" % data_dir,
                 images=training_images,
                 targets=training_targets,
             )
@@ -500,7 +484,6 @@ if __name__ == "__main__":
             "seed": seed,
             "notes": notes,
             "epochs": epochs,
-            # "probe_neurons": probe_neurons,
         }
 
         # Save our set up parameters
@@ -511,16 +494,8 @@ if __name__ == "__main__":
 
     else:
 
-        # synapses = [None, 0.005, 0.005, None]
-        # synapses = [None,] * 4
-        # synapses = [.003,] * 4
-        # synapses = [None, None, None, 0.005]
-        # synapses = [None, 0.001, 0.001, None]
         synapses = [0.001] * 4
-        # weights = save_folder + "/epoch_99"
-        # weights = "data/rover_training_0004/loihirelunoise_005/200/epoch_173"
-        # weights = "data/rover_training_0004/loihirelu/200/epoch_99"
-        weights = "/home/tdewolf/Downloads/data/rover_training_0004/loihirelunoise/400/epoch_14"
+        weights = "%s/data/rover_training_0004/loihirelunoise/400/epoch_14" % data_dir
 
         with tf.keras.backend.learning_phase_scope(1) if use_dl_rate else nullcontext():
             sim, net = vision.convert(
@@ -540,23 +515,18 @@ if __name__ == "__main__":
                     stateful=False,
                 )
 
-            # if non-batched prediction using sim.run in Nengo (not NengoDL)
-            # the extend function gives you access to the input keras layer so you can inject data
             elif mode == "run":
-                # net = sim.model.toplevel
-                print("Trying to freeze")
                 with sim:
                     sim.freeze_params(net)
                 # if we want to run this in Nengo and not Nengo DL
                 # have to extend our network to manually inject input images
                 sim = vision.convert_nengodl_to_nengo(net)
-                # NOTE that the user will need to pass their input image to
-                # rover_vision.image_input if using an external rover_vision.sim.run call
-                print(n_validation_steps)
-                print(n_validation)
+
+                # the user needs to pass input image to rover_vision.image_input
+                # should be [n_timesteps, image.flatten()]
+                vision.image_input = validation_images[0]
 
                 sim_steps = dt * n_validation_steps * n_validation
-                vision.image_input = validation_images
                 sim.run(sim_steps)
                 data = sim.data
 
@@ -570,21 +540,3 @@ if __name__ == "__main__":
                 num_pts=num_pts,
                 show_plot=True,
             )
-
-            # if probe_neurons:
-            #     # pass in the input images so we can see the neural activity next to the input image
-            #     # since we repeat n_validation_steps times, just take the first column in the 2nd dim
-            #     images = validation_images.reshape(
-            #         (n_validation, n_validation_steps, res[0], res[1], 3)
-            #     )[:, 0, :, :, :].squeeze()
-            #     # skip showing the neurons next to images
-            #     images = None
-            #
-            #     dl_utils.plot_neuron_activity(
-            #         activity=data[vision.neuron_probe],
-            #         num_pts=num_pts,
-            #         save_folder=save_folder,
-            #         save_name="%s_activity" % mode,
-            #         num_neurons_to_plot=100,
-            #         images=images,
-            #     )
