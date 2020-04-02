@@ -121,7 +121,7 @@ def demo(backend='cpu'):
     angle_limit = [-np.pi, np.pi]
 
     # data collection parameters
-    generate_training_data = True
+    generate_training_data = False
     save_rendered_fig = False
     track_results = False
     target_track = []
@@ -129,8 +129,8 @@ def demo(backend='cpu'):
     motor_track = []
     n_targets = 1000
     # in steps (1ms/step)
-    render_frequency = 1
-    reaching_steps = 1
+    render_frequency = 100
+    reaching_steps = 2000
     sim_length = reaching_steps * n_targets
     imgs = []
 

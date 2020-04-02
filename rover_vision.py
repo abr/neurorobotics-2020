@@ -35,10 +35,6 @@ if gpus:
         print(e)
 # =============================================================================
 
-# this line is crucial for linking the Loihi neuron implementations
-# to their differentiable TensorFlow implementations!
-nengo_loihi.builder.nengo_dl.install_dl_builders()
-
 
 class RoverVision:
     def __init__(self, res, minibatch_size, dt, seed):
@@ -56,7 +52,6 @@ class RoverVision:
         Get outputs by connecting to the vision.output node
 
         vision = RoverVision(res=[32, 128], minibatch_size=10, dt=0.001, seed=0)
-        vision.extend_network()
 
         with vision.net as net:
             def sim_fun(t, x):
@@ -93,11 +88,9 @@ class RoverVision:
         self.minibatch_size = minibatch_size
 
         # Define our keras network
-        self.input = tf.keras.Input(
-            shape=(res[0], res[1], 3), batch_size=self.minibatch_size
-        )
+        self.input = tf.keras.Input(shape=(res[0], res[1], 3))
 
-        self.conv1 = tf.keras.layers.Conv2D(
+        self.conv0 = tf.keras.layers.Conv2D(
             filters=3,
             kernel_size=1,
             strides=1,
@@ -106,27 +99,28 @@ class RoverVision:
             data_format="channels_last",
         )(self.input)
 
-        self.conv2 = tf.keras.layers.Conv2D(
+        self.conv1 = tf.keras.layers.Conv2D(
             filters=32,
             kernel_size=3,
             strides=1,
             use_bias=False,
             activation=tf.nn.relu,
             data_format="channels_last",
-        )(self.conv1)
+        )(self.conv0)
 
-        flatten1 = tf.keras.layers.Flatten()(self.conv2)
+        flatten = tf.keras.layers.Flatten()(self.conv1)
+        self.dense = tf.keras.layers.Dense(units=2, use_bias=False)(flatten)
 
-        self.dense1 = tf.keras.layers.Dense(units=2, use_bias=False)(flatten1)
+        self.model = tf.keras.Model(inputs=self.input, outputs=self.dense)
 
-        self.model = tf.keras.Model(inputs=self.input, outputs=self.dense1)
-
-    def convert(self, gain_scale, activation, synapses=None):
+    def convert(self, gain_scale, activation, synapse=None):
         """
         gain_scale: int
             scaling factor for spiking network to increase the amount of activity.
             gain gets scaled by gain_scale and neuron amplitudes get set to 1/gain_scale
-        synapses: list of 4 floats or None's
+        actiation: nengo.Neuron
+            the neuron type to swap in for the tf.nn.relu in the Keras network
+        synapse: float
             synapses set on nengo connections
         """
 
@@ -134,33 +128,27 @@ class RoverVision:
             self.model,
             swap_activations={tf.nn.relu: activation},
             scale_firing_rates=gain_scale,
+            synapse=synapse,
         )
 
         # create references to some nengo objects in the network IO objects
         self.nengo_input = converter.inputs[self.input]
-        self.nengo_dense1 = converter.outputs[self.dense1]
+        self.nengo_dense = converter.outputs[self.dense]
 
         net = converter.net
 
+        nengo_conv0 = converter.layers[self.conv0]
         nengo_conv1 = converter.layers[self.conv1]
-        nengo_conv2 = converter.layers[self.conv2]
+        self.nengo_output = converter.layers[self.dense]
 
         with net:
             # set our biases to non-trainable to make sure they're always 0
+            net.config[nengo_conv0].trainable = False
             net.config[nengo_conv1].trainable = False
-            net.config[nengo_conv2].trainable = False
 
             # set up probes so that we can add the firing rates to the cost function
+            self.probe_conv0 = nengo.Probe(nengo_conv0, label="probe_conv0")
             self.probe_conv1 = nengo.Probe(nengo_conv1, label="probe_conv1")
-            self.probe_conv2 = nengo.Probe(nengo_conv2, label="probe_conv2")
-
-        # set our synapses
-        if synapses is not None:
-            for cc, conn in enumerate(net.all_connections):
-                conn.synapse = synapses[cc]
-                print("Setting synapse to %s on " % str(synapses[cc]), conn)
-            self.nengo_dense1.synapse = synapses[3]
-            print("Setting synapse to %s on output probe" % str(synapses[3]))
 
         sim = nengo_dl.Simulator(
             net, minibatch_size=self.minibatch_size, seed=self.seed
@@ -179,7 +167,7 @@ class RoverVision:
         with net:
             if loihi:
                 nengo_loihi.add_params(net)
-                net.config[self.conv1].on_chip = False
+                net.config[self.conv0].on_chip = False
             # create out input node
             image_input_node = nengo.Node(send_image_in, size_out=self.subpixels)
             self.input_probe = nengo.Probe(image_input_node)
@@ -191,7 +179,7 @@ class RoverVision:
         else:
             sim = nengo.Simulator(net, dt=self.dt)
 
-        return sim
+        return sim, net
 
     def train(
         self,
@@ -233,13 +221,13 @@ class RoverVision:
         if validation_images is not None:
             validation_images_dict = {self.nengo_input: validation_images}
 
-        loss = {self.nengo_dense1: tf.losses.mse}
-        training_targets = {self.nengo_dense1: targets}
+        loss = {self.nengo_dense: tf.losses.mse}
+        training_targets = {self.nengo_dense: targets}
         if fr_loss_function:
+            loss[self.probe_conv0]: fr_loss_function
             loss[self.probe_conv1]: fr_loss_function
-            loss[self.probe_conv2]: fr_loss_function
+            train_data[self.probe_conv0]: np.zeros(targets.shape)
             train_data[self.probe_conv1]: np.zeros(targets.shape)
-            train_data[self.probe_conv2]: np.zeros(targets.shape)
 
         with sim:
             sim.compile(optimizer=tf.optimizers.RMSprop(0.00001), loss=loss)
@@ -288,7 +276,7 @@ class RoverVision:
                     print(data)
 
                     dl_utils.plot_prediction_error(
-                        predictions=np.asarray(data[vision.nengo_dense1]),
+                        predictions=np.asarray(data[vision.nengo_dense]),
                         target_vals=validation_targets,
                         save_folder=save_folder,
                         save_name="validation_error_epoch_%i" % epoch,
@@ -307,9 +295,9 @@ if __name__ == "__main__":
         "srelu": nengo.SpikingRectifiedLinear(),
         "lif": nengo.LIF(),
         "loihirelu": nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
-        "loihirelunoise": nengo_loihi.neurons.LoihiSpikingRectifiedLinear(
-            nengo_dl_noise=nengo_loihi.neurons.LowpassRCNoise(0.001)
-        ),
+        # "loihirelunoise": nengo_loihi.neurons.LoihiSpikingRectifiedLinear(
+        #     nengo_dl_noise=nengo_loihi.neurons.LowpassRCNoise(0.001)
+        # ),
         "loihilif": nengo_loihi.neurons.LoihiLIF(),
     }
 
@@ -449,7 +437,7 @@ if __name__ == "__main__":
         )
 
         sim, net = vision.convert(
-            gain_scale=gain_scale, activation=activation, synapses=None
+            gain_scale=gain_scale, activation=activation, synapse=None
         )
         vision.train(
             sim=sim,
@@ -499,7 +487,7 @@ if __name__ == "__main__":
 
         with tf.keras.backend.learning_phase_scope(1) if use_dl_rate else nullcontext():
             sim, net = vision.convert(
-                gain_scale=gain_scale, activation=activation, synapses=synapses,
+                gain_scale=gain_scale, activation=activation, synapse=synapse,
             )
 
             # load a specific set of weights
@@ -520,7 +508,7 @@ if __name__ == "__main__":
                     sim.freeze_params(net)
                 # if we want to run this in Nengo and not Nengo DL
                 # have to extend our network to manually inject input images
-                sim = vision.convert_nengodl_to_nengo(net)
+                sim, net = vision.convert_nengodl_to_nengo(net)
 
                 # the user needs to pass input image to rover_vision.image_input
                 # should be [n_timesteps, image.flatten()]
@@ -530,10 +518,10 @@ if __name__ == "__main__":
                 sim.run(sim_steps)
                 data = sim.data
 
-            print("data shape: ", data[vision.nengo_dense1].shape)
+            print("data shape: ", data[vision.nengo_dense].shape)
             print("vvalidation targets size: ", validation_targets.shape)
             dl_utils.plot_prediction_error(
-                predictions=np.asarray(data[vision.nengo_dense1]),
+                predictions=np.asarray(data[vision.nengo_dense]),
                 target_vals=validation_targets,
                 save_folder=save_folder,
                 save_name="%s_prediction_error" % mode,
