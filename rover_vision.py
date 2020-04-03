@@ -86,6 +86,7 @@ class RoverVision:
         self.seed = seed
         self.subpixels = res[0] * res[1] * 3
         self.minibatch_size = minibatch_size
+        self.image_input = np.zeros(self.subpixels)
 
         # Define our keras network
         self.input = tf.keras.Input(shape=(res[0], res[1], 3))
@@ -160,7 +161,7 @@ class RoverVision:
         def send_image_in(t):
             # if updating an image over time, like rendering from a simulator
             # then we update this object each time
-            return self.image_input[int(t / 0.001) - 1]
+            return self.image_input#[int(t / 0.001) - 1]
 
         # if not using nengo dl we have to use a sim.run function
         # create a node so we can inject data into the network
