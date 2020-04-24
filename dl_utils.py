@@ -154,7 +154,11 @@ def load_data(db_name, label='training_0000', n_imgs=None):
     # load training images
     training_images = []
     training_targets = []
-    for nn in range(0, n_imgs):
+
+    keys = np.array([int(val) for val in dat.get_keys('%s/data' % label)])
+    print('Total number of images in dataset: ', max(keys))
+
+    for nn in range(n_imgs):
         data = dat.load(parameters=['rgb', 'target'], save_location='%s/data/%04d' % (label, nn))
         training_images.append(data['rgb'])
         training_targets.append(data['target'])
@@ -163,6 +167,48 @@ def load_data(db_name, label='training_0000', n_imgs=None):
     training_targets = np.asarray(training_targets)
 
     return training_images, training_targets
+
+
+def plot_data(db_name, label='training_0000', n_imgs=None):
+    """
+    loads rgb images and targets from an hdf5 database and plots the images, prints
+    the targets
+
+    Expects data to be saved in the following group stucture:
+        Training Data
+        training_0000/data/0000     using %04d to increment data name
+
+        Validation Data
+        validation_0000/data/0000       using %04d to increment data name
+
+        Both return an array with the rgb image saved under the 'rgb' key
+        and the target saved under the 'target' key
+
+    Parameters
+    ----------
+    db_name: string
+        name of database to load from
+    label: string, Optional (Default: 'training_0000')
+        location in database to load from
+    n_imgs: int
+        how many images to load
+    """
+    #TODO: specify the data format expected in the comment above
+    dat = DataHandler(db_name)
+
+    keys = np.array([int(val) for val in dat.get_keys('%s/data' % label)])
+    print('Total number of images in dataset: ', max(keys))
+
+    for nn in range(n_imgs):
+        data = dat.load(parameters=['rgb', 'target'], save_location='%s/data/%04d' % (label, nn))
+
+        print('Target: ', data['target'])
+
+        plt.figure()
+        a = plt.subplot(1, 1, 1)
+        a.imshow(data['rgb'] / 255)
+        plt.show()
+
 
 # very long function for plotting results and debugging fun
 def plot_prediction_error(
@@ -230,12 +276,9 @@ def plot_prediction_error(
     plt.xlim([-3, 3])
     plt.ylim([-3, 3])
     plt.scatter(0, 0, color='r', label='rover', s=2)
-    plt.scatter(
-        target_vals,
-        target_vals, label='target', s=1)
-        # target_vals[-num_pts:, 0],
-        # target_vals[-num_pts:, 1], label='target', s=1)
-    plt.legend()
+    plt.scatter(target_vals[:, 0], target_vals[:, 1], label='target', s=1)
+    plt.gca().set_aspect('equal')
+    # plt.legend()
     plt.tight_layout()
     plt.savefig('%s/%s.png' % (save_folder, save_name))
     print('Saving prediction results to %s/%s.png' % (save_folder, save_name))
