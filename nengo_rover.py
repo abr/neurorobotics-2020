@@ -121,16 +121,16 @@ def demo(backend='cpu'):
     angle_limit = [-np.pi, np.pi]
 
     # data collection parameters
-    generate_training_data = False
+    generate_training_data = True
     save_rendered_fig = False
     track_results = False
     target_track = []
     prediction_track = []
     motor_track = []
-    n_targets = 1000
+    n_targets = 30000
     # in steps (1ms/step)
-    render_frequency = 100
-    reaching_steps = 2000
+    render_frequency = 1
+    reaching_steps = 1
     sim_length = reaching_steps * n_targets
     imgs = []
 
@@ -151,9 +151,10 @@ def demo(backend='cpu'):
     kernel_size = [3, 3, 3]
     strides = [1, 1, 1]
 
-    dat = DataHandler(db_name='circular_targets')
+    dat = DataHandler(db_name='abr_analyze')
     # test_name = 'combined_net_1conv_layer_spiking_with_synapses'
-    test_name = 'validation_0000'
+    # test_name = 'validation_0000'
+    test_name = 'training_0000'
     # dat.save(
     #     data={
     #             'render_frequency': render_frequency,
@@ -258,11 +259,12 @@ def demo(backend='cpu'):
 
     # get target object id so we can change its colour
     target_geom_id = model.geom_name2id("target")
-    green = [0, 0.9, 0, 0.5]
-    red = [0.9, 0, 0, 0.5]
+    green = [0, 0.9, 0, 1]
+    red = [0.9, 0, 0, 1]
 
     # set up the target position
-    net.interface.viewer.target = np.array([-0.4, 0.5, 0.4])
+    target_height = 0.3
+    net.interface.viewer.target = np.array([-0.4, 0.5, target_height])
 
     with net:
         net.count = -1
@@ -384,21 +386,20 @@ def demo(backend='cpu'):
             # update our target
             if net.count % reaching_steps == 0:
                 net.target_count += 1
-                # phis = [-1.45, 0.4, 1.1]
-                # radii = [1.2, 0.8, 2.6]
-                phis = np.linspace(-3.14, 3.14, 100)
-                phis = np.tile(phis, 10)
-                # radii = np.linspace(0.8, 3.4, 200)
-                radii = np.linspace(0.5, 3.5, 1000)
-                # radii = np.repeat(radii, 100)
-                # phi = np.random.uniform(low=angle_limit[0], high=angle_limit[1])
-                # radius = np.random.uniform(low=dist_limit[0], high=dist_limit[1])
-                phi = phis[net.target_count]
-                radius = radii[net.target_count]
+                # generate test set
+                # phis = np.linspace(-3.14, 3.14, 100)
+                # phis = np.tile(phis, 10)
+                # radii = np.linspace(0.5, 3.5, 1000)
+                # generate training set
+                phi = np.random.uniform(low=-np.pi, high=np.pi)
+                radius = np.random.uniform(low=0, high=3.5)
+                # running test
+                # radius = radii[net.target_count]
+                # phi = phis[net.target_count]
                 viewer.target = [
                     np.cos(phi) * radius,
                     np.sin(phi) * radius,
-                    0.4]
+                    target_height]
                 interface.set_mocap_xyz("target", viewer.target)
 
             # send to mujoco, stepping the sim forward --------------------------------
