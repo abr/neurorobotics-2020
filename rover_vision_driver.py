@@ -30,6 +30,7 @@ from abr_control.interfaces.mujoco import Mujoco
 from abr_analyze import DataHandler
 
 from rover_vision import RoverVision
+from loihi_rate_neuron import LoihiRectifiedLinear
 
 
 class ExitSim(Exception):
@@ -56,21 +57,25 @@ if len(sys.argv) > 1:
 print("Using %s as backend" % backend)
 
 
-def demo(backend="cpu"):
+generate_data = True
+plot_mounted_camera_freq = None  # = None to not plot
+
+def demo(backend="cpu", test_name='validation_0000'):
     if backend == "loihi":
         nengo_loihi.set_defaults()
 
     seed = 9
     rng = np.random.RandomState(seed)
     # target generation limits
-    dist_limit = [0.5, 3.5]
+    dist_limit = [0.25, 3.5]
     angle_limit = [-np.pi, np.pi]
 
     # data collection parameters
     # in steps (1ms/step)
     render_frequency = 1
-    reaching_steps = 500
-    imgs = []
+    save_frequency = 10
+    reaching_steps = 3000
+    total_images_saved = 1000
 
     # network parameters
     n_dof = 3  # 2 wheels to control
@@ -80,6 +85,19 @@ def demo(backend="cpu"):
     render_size = [32, 32]
     res = [render_size[0], render_size[1] * 4]
     subpixels = res[0] * res[1] * 3
+
+    dat = DataHandler()
+    dat.save(
+        data={
+            'render_frequency': render_frequency,
+            'save_frequency': save_frequency,
+            'reaching_steps': reaching_steps,
+            'render_size': render_size,
+            'dist_limit': dist_limit,
+            'angle_limit': angle_limit
+        },
+        save_location='%s/params' % test_name,
+        overwrite=True)
 
     # initialize our robot config for the jaco2
     robot_config = MujocoConfig(folder="", xml_file="rover.xml", use_sim_state=True)
@@ -111,23 +129,33 @@ def demo(backend="cpu"):
     red = [0.9, 0, 0, 0.5]
 
     # set up the target position
-    net.interface.viewer.target = np.array([-0.4, 0.5, 0.4])
+    net.interface.viewer.target = np.array([-0.4, 0.5, 0.2])
 
     with net:
-        net.count = -1
-        net.target_count = -1
-        net.imgs = []
+        net.count = 0
+        net.image_count = 0
+        net.target_count = 0
         net.predicted_xy = [0, 0]
         start = timeit.default_timer()
 
-        vision = RoverVision(res=res, minibatch_size=1, dt=0.001, seed=0)
-        _, visionnet = vision.convert(
+        # track position
+        net.target_track = []
+        net.rover_track = []
+
+        vision = RoverVision(res=res, seed=0)
+        visionsim, visionnet = vision.convert(
             gain_scale=400,
-            activation=nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
-            synapse=0.001,
+            # activation=nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
+            activation=LoihiRectifiedLinear(),
+            synapse=None,#0.001,
         )
+        visionsim.load_params(
+            "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_999"
+        )
+        with visionsim:
+            visionsim.freeze_params(visionnet)
         _, visionnet = vision.convert_nengodl_to_nengo(visionnet)
-        visionnet.image_input = np.zeros((res[0], res[1], 3))
+        image_input = np.zeros((res[0], res[1], 3))
 
         def sim_func(t, x):
             u = x[:3]
@@ -135,62 +163,19 @@ def demo(backend="cpu"):
 
             # get our image data
             if net.count % render_frequency == 0:
-                # TODO rename the vision sensors so we can stack them sequentially by name
                 for ii, jj in enumerate([4, 1, 3, 2]):
                     interface.offscreen.render(res[0], res[0], camera_id=jj)
-                    visionnet.image_input[
+                    image_input[
                         :, res[0] * ii : res[0] * (ii + 1)
-                    ] = interface.offscreen.read_pixels(res[0], res[0])[0] / 255
+                    ] = interface.offscreen.read_pixels(res[0], res[0])[0]# / 255
+                    vision.image_input[:] = image_input.flatten()
 
-                if net.count % 1000 == 0:
-                    plt.figure()
-                    a = plt.subplot(1, 1, 1)
-                    a.imshow(visionnet.image_input)
-                    plt.show()
-
-                # raw_img = np.hstack(
-                #     [np.hstack((imgs[3], imgs[0])), np.hstack((imgs[2], imgs[1]))]
-                # )
-
-                # get predicted target from vision
-                # vision.image_input = resize_images(
-                #     raw_img, res=res, show_resized_image=False, flatten=True
-                # ).squeeze()
-
-                # scaled_image_data = []
-                # for count, data in enumerate(raw_img):
-                #     # normalize to 0-255
-                #     # rgb = np.asarray(data) / 255
-                #     # if np.any(rgb < 0):
-                #     #     raise Exception("All data should be positive")
-                #
-                #     # resize image resolution
-                #     if shape[1] != res[0] or shape[2] != res[1]:
-                #         print("Resolution does not match desired value, resizing...")
-                #         print("Desired Res: ", res)
-                #         print("Input Res: ", [shape[1], shape[2]])
-                #         rgb = cv2.resize(rgb, dsize=(res[1], res[0]), interpolation=cv2.INTER_CUBIC)
-                #
-                #     # # visualize scaling for debugging
-                #     # if show_resized_image:
-                #     #     plt.Figure()
-                #     #     a = plt.subplot(121)
-                #     #     a.set_title("Original")
-                #     #     a.imshow(data, origin="lower")
-                #     #     b = plt.subplot(122)
-                #     #     b.set_title("Scaled")
-                #     #     b.imshow(rgb, origin="lower")
-                #     #     plt.show()
-                #
-                #     # flatten to 1D
-                #     # NOTE should use np.ravel to maintain image order
-                #     if flatten:
-                #         rgb = rgb.flatten()
-                #     # scale image from -1 to 1 and save to list
-                #     # scaled_image_data.append(rgb*2 - 1)
-                #     scaled_image_data.append(rgb)
-                #
-                # vision.image_input = np.asarray(scaled_image_data)
+            if plot_mounted_camera_freq is not None and net.count % plot_mounted_camera_freq == 0:
+                # plot the mounted camera output every so often
+                plt.figure()
+                a = plt.subplot(1, 1, 1)
+                a.imshow(vision.image_input.reshape((res[0], res[1], 3)) / 255)
+                plt.show()
 
             error = viewer.target - robot_config.Tx("EE")
             model.geom_rgba[target_geom_id] = green if np.linalg.norm(error) < 0.02 else red
@@ -208,36 +193,60 @@ def demo(backend="cpu"):
                 ]
             )
             R = np.dot(R90, R_raw)
-            local_target = np.dot(R, error)
 
             # we also want the egocentric velocity of the rover
             body_com_vel_raw = data.cvel[model.body_name2id("base_link")][3:]
             body_com_vel = np.dot(R, body_com_vel_raw)
 
             feedback = interface.get_feedback()
-            q = feedback["q"]
-            dq = feedback["dq"]
+            output_signal = np.array(
+                [body_com_vel[1], feedback['q'][0], feedback['dq'][0]])
 
-            local_target = local_target[:2]
-            output_signal = np.array([body_com_vel[1], q[0], dq[0]])
+            if net.count % save_frequency == 0:
+                # save relevant data
+                if generate_data:
+                    local_target = np.dot(R, error)
+                    print('Target Count: %i ' % (int(net.count/save_frequency)))
+                    save_data={
+                            'rgb': image_input,
+                            'target': local_target,
+                            }
 
-            # TODO change this to index into an array
-            # output_signal = np.hstack((output_signal, rendered_image))
+                    dat.save(
+                            data=save_data,
+                            save_location='%s/data/%04d' % (test_name, net.image_count),
+                        overwrite=True)
+                    print("%s/data/%04d" % (test_name, net.image_count))
+                net.image_count += 1
 
-            if viewer.exit:
+            if viewer.exit or net.image_count == total_images_saved:
                 glfw.destroy_window(viewer.window)
                 raise ExitSim
 
             # update our target
             if net.count % reaching_steps == 0:
-                net.target_count += 1
-                phis = np.linspace(-3.14, 3.14, 100)
-                phis = np.tile(phis, 10)
-                radii = np.linspace(0.5, 3.5, 1000)
-                phi = phis[net.target_count]
-                radius = radii[net.target_count]
-                viewer.target = [np.cos(phi) * radius, np.sin(phi) * radius, 0.4]
+                # generate test set
+                # phis = np.linspace(-3.14, 3.14, 100)
+                # phis = np.tile(phis, 10)
+                # radii = np.linspace(0.5, 3.5, 1000)
+                # phi = phis[net.target_count]
+                # radius = radii[net.target_count]
+                # phi = np.random.choice(phis)
+                # radius = np.random.choice(radii)
+                # generate training set
+                phi = np.random.uniform(low=angle_limit[0], high=angle_limit[1])
+                radius = np.random.uniform(low=dist_limit[0], high=dist_limit[1])
+                viewer.target = [
+                    np.cos(phi) * radius,
+                    np.sin(phi) * radius,
+                    0.2
+                ]
                 interface.set_mocap_xyz("target", viewer.target)
+                net.target_count += 1
+
+            # track data
+            net.target_track.append(viewer.target)
+            net.rover_track.append(robot_config.Tx('EE'))
 
             # send to mujoco, stepping the sim forward --------------------------------
             interface.send_forces(np.asarray(u))
@@ -253,8 +262,9 @@ def demo(backend="cpu"):
             q = x[1]
             dq = x[2]
             error = x[3:]
+            # print('error: %2.3f, %2.3f' % (error[0], error[1]))
 
-            dist = np.linalg.norm(error)
+            dist = np.linalg.norm(error * 100)
 
             # input to arctan2 is modified to account for (x, y) axes of rover vs
             # the (x, y) axes of the environment
@@ -281,7 +291,7 @@ def demo(backend="cpu"):
             n_motor_neurons, d=n_input
         )
         motor_control = nengo.Ensemble(
-            # neuron_type=nengo.Direct(),
+            neuron_type=nengo.Direct(),
             n_neurons=n_motor_neurons,
             dimensions=n_input,
             radius=np.sqrt(n_input),
@@ -289,15 +299,8 @@ def demo(backend="cpu"):
             seed=seed,
         )
 
-        # # send rendered image to vision network
-        # nengo.Connection(
-        #     sim[3:],
-        #     vision.nengo_input,
-        #     # synapse=None
-        # )
-
         # send vision prediction to motor control
-        nengo.Connection(vision.nengo_output, motor_control[3:])
+        nengo.Connection(vision.nengo_output, motor_control[3:], synapse=0.005)
 
         # send motor feedback to motor control
         nengo.Connection(sim[:3], motor_control[:3], synapse=None)
@@ -307,31 +310,41 @@ def demo(backend="cpu"):
             motor_control,
             # onchip_output,
             sim[:5],
-            # function=steering_function
+            function=steering_function
         )
 
     return net, robot_config
 
 
 if __name__ == "__main__":
-    net, robot_config = demo(backend)
-    try:
-        if backend == "loihi":
-            sim = nengo_loihi.Simulator(net, target="sim")
-            #     , target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
-            # )
-        elif backend == "cpu":
-            sim = nengo.Simulator(net, progress_bar=False)
+    for ii in range(29, 30):
+        print('\n\nBeginning round ', ii)
+        net, robot_config = demo(backend, test_name='driving_%04i' % ii)
+        try:
+            if backend == "loihi":
+                sim = nengo_loihi.Simulator(net, target="sim")
+                #     , target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
+                # )
+            elif backend == "cpu":
+                sim = nengo.Simulator(net, progress_bar=False)
 
-        while 1:
-            sim.run(1e5)
+            while 1:
+                sim.run(1e5)
 
-    except ExitSim:
-        pass
+        except ExitSim:
+            pass
 
-    finally:
-        net.interface.disconnect()
-        sim.close()
+        finally:
+            net.interface.disconnect()
+            sim.close()
+
+            # plot data
+            target = np.array(net.target_track)
+            rover = np.array(net.rover_track)
+            plt.plot(target[:, 0], target[:, 1], 'x', mew=3)
+            plt.plot(rover[:, 0], rover[:, 1], lw=2)
+            plt.show()
+
 
 else:
     model, _ = demo()
