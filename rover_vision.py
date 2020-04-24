@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 from abr_analyze import DataHandler
 from nengo.utils.matplotlib import rasterplot
 
+from loihi_rate_neuron import LoihiRectifiedLinear
+
 
 # =================== Tensorflow settings to avoid OOM errors =================
 warnings.simplefilter("ignore")
@@ -37,7 +39,7 @@ if gpus:
 
 
 class RoverVision:
-    def __init__(self, res, minibatch_size, dt, seed):
+    def __init__(self, res, minibatch_size=1, dt=0.001, seed=0):
         """
         A keras converted network for locating a red ball in a mujoco generated image.
         Returns the local error (x, y).
@@ -95,16 +97,16 @@ class RoverVision:
             filters=3,
             kernel_size=1,
             strides=1,
-            use_bias=False,
+            # use_bias=False,
             activation=tf.nn.relu,
             data_format="channels_last",
         )(self.input)
 
         self.conv1 = tf.keras.layers.Conv2D(
             filters=32,
-            kernel_size=3,
+            kernel_size=5,
             strides=1,
-            use_bias=False,
+            # use_bias=False,
             activation=tf.nn.relu,
             data_format="channels_last",
         )(self.conv0)
@@ -138,6 +140,7 @@ class RoverVision:
 
         net = converter.net
 
+        self.nengo_innode = converter.layers[self.input]
         nengo_conv0 = converter.layers[self.conv0]
         nengo_conv1 = converter.layers[self.conv1]
         self.nengo_output = converter.layers[self.dense]
@@ -156,12 +159,14 @@ class RoverVision:
         )
         return sim, net
 
-    def convert_nengodl_to_nengo(self, net, loihi=False):
+    def convert_nengodl_to_nengo(self, net, image_array=False, loihi=False):
         # our input node function
         def send_image_in(t):
             # if updating an image over time, like rendering from a simulator
             # then we update this object each time
-            return self.image_input#[int(t / 0.001) - 1]
+            if image_array:
+                return self.image_input[int(t / 0.001) - 1]
+            return self.image_input
 
         # if not using nengo dl we have to use a sim.run function
         # create a node so we can inject data into the network
@@ -170,9 +175,8 @@ class RoverVision:
                 nengo_loihi.add_params(net)
                 net.config[self.conv0].on_chip = False
             # create out input node
-            image_input_node = nengo.Node(send_image_in, size_out=self.subpixels)
-            self.input_probe = nengo.Probe(image_input_node)
-            nengo.Connection(image_input_node, self.nengo_input, synapse=None)
+            self.nengo_innode.size_out = self.subpixels
+            self.nengo_innode.output = send_image_in
 
         # overwrite the nengo_dl simulator with the nengo simulator
         if loihi:
@@ -231,7 +235,7 @@ class RoverVision:
             train_data[self.probe_conv1]: np.zeros(targets.shape)
 
         with sim:
-            sim.compile(optimizer=tf.optimizers.RMSprop(0.00001), loss=loss)
+            sim.compile(optimizer=tf.optimizers.RMSprop(0.001), loss=loss)
 
             for epoch in range(epochs[0], epochs[1]):
                 print("\nEPOCH %i" % epoch)
@@ -245,13 +249,14 @@ class RoverVision:
 
                 print("using learning rate scheduler...")
 
-                def scheduler(epoch):
-                    if epoch < 2:
-                        return 0.001
-                    else:
-                        lr = 0.0001 * tf.math.exp(0.1 * (2 - epoch))
-                        print("Learning rate: ", lr)
-                        return lr
+                # if epoch < 2:
+                #     def scheduler(x):
+                #         return 0.001
+                # else:
+                def scheduler(x):
+                    return 0.0001 * np.exp(0.1 * (0 - epoch//2))
+
+                print("Learning rate: ", scheduler(None))
 
                 lr_scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
 
@@ -296,9 +301,7 @@ if __name__ == "__main__":
         "srelu": nengo.SpikingRectifiedLinear(),
         "lif": nengo.LIF(),
         "loihirelu": nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
-        # "loihirelunoise": nengo_loihi.neurons.LoihiSpikingRectifiedLinear(
-        #     nengo_dl_noise=nengo_loihi.neurons.LowpassRCNoise(0.001)
-        # ),
+        "loihirelurate": LoihiRectifiedLinear(),
         "loihilif": nengo_loihi.neurons.LoihiLIF(),
     }
 
@@ -318,54 +321,49 @@ if __name__ == "__main__":
     if len(sys.argv) > 4:
         use_dl_rate = sys.argv[4] == "use_dl_rate"
 
+    use_new_driver_validation = True
+
     # ------------ set test parameters
     dt = 0.001
-    db_name = "rover_training_0004"
+    # db_name = "rover_training_0004"
+    db_name = "abr_analyze"
     res = [32, 128]
     n_training = 30000  # number of images to train on
-    n_validation = 50  # number of validation images
-    n_validation_steps = 30
-    seed = 0
+    n_validation = 10000  # number of validation images
+    n_validation_steps = 1
+    seed = np.random.randint(1e5)
     data_dir = "/home/tdewolf/Downloads"
 
     # using baseline of 1ms timesteps to define n_steps
     # adjust based on dt to keep sim time constant
     n_validation_steps = int(n_validation_steps * 0.001 / dt)
 
-    minibatch_size = 50 if mode == "train" else 1
+    minibatch_size = 10 if mode == "train" else 1
     # can't have a minibatch larger than our number of images
     minibatch_size = min(minibatch_size, n_validation)
 
     # plotting parameters
     num_pts = n_validation * n_validation_steps  # number of steps to plot
 
+    # dl_utils.plot_data(db_name=db_name, label='validation_0000', n_imgs=100)
+
     # ------------ load and prepare our data
-    try:
-        processed_data = np.load("%s/validation_images_processed.npz" % data_dir)
-        validation_images = processed_data["images"]
-        validation_targets = processed_data["targets"]
-    except:
-        # load our raw data
-        validation_images, validation_targets = dl_utils.load_data(
-            db_name=db_name, label="validation_0000", n_imgs=n_validation
-        )
+    # load our raw data
+    validation_images, validation_targets = dl_utils.load_data(
+        db_name=db_name, label="validation_0000", n_imgs=n_validation
+    )
 
-        # our saved targets are 3D but we only care about x and y
-        valiation_targets = validation_targets[:, 0:2]
+    # our saved targets are 3D but we only care about x and y
+    validation_targets = validation_targets[:, 0:2]
 
-        # do our resizing, scaling, and flattening
-        validation_images = dl_utils.preprocess_images(
-            image_data=validation_images,
-            show_resized_image=False,
-            flatten=True,
-            normalize=False,
-            res=res,
-        )
-        np.savez_compressed(
-            "%s/validation_images_processed" % data_dir,
-            images=validation_images,
-            targets=validation_targets,
-        )
+    # do our resizing, scaling, and flattening
+    validation_images = dl_utils.preprocess_images(
+        image_data=validation_images,
+        show_resized_image=False,
+        flatten=True,
+        normalize=False,
+        res=res,
+    )
 
     # we have to set the minibatch_size when instantiating the network so if we want
     # to run sim.predict after each training session to track progress, we need to have
@@ -398,20 +396,24 @@ if __name__ == "__main__":
     if mode == "train":
 
         n_training_steps = 1
-        epochs = [0, 100]
+        epochs = [0, 1000]
 
         # prepare training data ------------------------------------
         try:
-            processed_data = np.load("%s/training_images_processed.npz" % data_dir)
+            processed_data = np.load("%s/%s_training_images_processed.npz" % (data_dir, db_name))
             training_images = processed_data["images"]
             training_targets = processed_data["targets"]
             print("Processed training images loaded from file...")
-        except:
+        except FileNotFoundError:
             print("Processed training images not found, generating...")
             # load raw data
-            training_images, training_targets = dl_utils.load_data(
-                db_name=db_name, label="training_0000", n_imgs=n_training
-            )
+            if test_name[:7] = 'driving':
+
+            else:
+                training_images, training_targets = dl_utils.load_data(
+                    db_name=db_name, label="training_0000", n_imgs=n_training
+                )
+
             # our saved targets are 3D but we only care about x and y
             training_targets = training_targets[:, 0:2]
 
@@ -424,7 +426,7 @@ if __name__ == "__main__":
                 res=res,
             )
             np.savez_compressed(
-                "%s/training_images_processed" % data_dir,
+                "%s/%s_training_images_processed" % (data_dir, db_name),
                 images=training_images,
                 targets=training_targets,
             )
@@ -483,8 +485,14 @@ if __name__ == "__main__":
 
     else:
 
-        synapses = [0.001] * 4
-        weights = "%s/data/rover_training_0004/loihirelunoise/400/epoch_14" % data_dir
+        synapse = None  # 0.001
+        # weights = "%s/data/rover_training_0004/loihirelunoise/400/epoch_14" % data_dir
+        # weights = "%s/data/%s/loihirelu/400/epoch_374" % (data_dir, db_name)
+        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_44"
+        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_64"
+        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_10"
+        # weights = "/home/tdewolf/Downloads/data/abr_analyze/relu/1/epoch_31"
+        weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_999"
 
         with tf.keras.backend.learning_phase_scope(1) if use_dl_rate else nullcontext():
             sim, net = vision.convert(
@@ -509,7 +517,7 @@ if __name__ == "__main__":
                     sim.freeze_params(net)
                 # if we want to run this in Nengo and not Nengo DL
                 # have to extend our network to manually inject input images
-                sim, net = vision.convert_nengodl_to_nengo(net)
+                sim, net = vision.convert_nengodl_to_nengo(net, image_array=True)
 
                 # the user needs to pass input image to rover_vision.image_input
                 # should be [n_timesteps, image.flatten()]
@@ -520,7 +528,7 @@ if __name__ == "__main__":
                 data = sim.data
 
             print("data shape: ", data[vision.nengo_dense].shape)
-            print("vvalidation targets size: ", validation_targets.shape)
+            print("validation targets size: ", validation_targets.shape)
             dl_utils.plot_prediction_error(
                 predictions=np.asarray(data[vision.nengo_dense]),
                 target_vals=validation_targets,
