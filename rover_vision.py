@@ -153,6 +153,7 @@ class RoverVision:
             # set up probes so that we can add the firing rates to the cost function
             self.probe_conv0 = nengo.Probe(nengo_conv0, label="probe_conv0")
             self.probe_conv1 = nengo.Probe(nengo_conv1, label="probe_conv1")
+            self.probe_dense = nengo.Probe(self.nengo_output, label="probe_dense", synapse=0.005)
 
         sim = nengo_dl.Simulator(
             net, minibatch_size=self.minibatch_size, seed=self.seed
@@ -329,10 +330,11 @@ if __name__ == "__main__":
     db_name = "abr_analyze"
     res = [32, 128]
     n_training = 30000  # number of images to train on
-    n_validation = 10000  # number of validation images
+    n_validation = 5000  # number of validation images
     n_validation_steps = 1
     seed = np.random.randint(1e5)
     data_dir = "/home/tdewolf/Downloads"
+    driving_data = True  # use data collected while driving around
 
     # using baseline of 1ms timesteps to define n_steps
     # adjust based on dt to keep sim time constant
@@ -350,7 +352,8 @@ if __name__ == "__main__":
     # ------------ load and prepare our data
     # load our raw data
     validation_images, validation_targets = dl_utils.load_data(
-        db_name=db_name, label="validation_0000", n_imgs=n_validation
+        # db_name=db_name, label="validation_0000", n_imgs=n_validation
+        db_name=db_name, label="driving_0040", n_imgs=10000,
     )
 
     # our saved targets are 3D but we only care about x and y
@@ -399,37 +402,62 @@ if __name__ == "__main__":
         epochs = [0, 1000]
 
         # prepare training data ------------------------------------
-        try:
-            processed_data = np.load("%s/%s_training_images_processed.npz" % (data_dir, db_name))
-            training_images = processed_data["images"]
-            training_targets = processed_data["targets"]
-            print("Processed training images loaded from file...")
-        except FileNotFoundError:
-            print("Processed training images not found, generating...")
-            # load raw data
-            if test_name[:7] = 'driving':
+        if driving_data:
+            try:
+                processed_data = np.load("%s/%s_driving_training_images_processed.npz" % (data_dir, db_name))
+                training_images = processed_data["images"]
+                training_targets = processed_data["targets"]
+                print("Processed training images loaded from file...")
+            except FileNotFoundError:
+                training_images, training_targets = dl_utils.consolidate_data(
+                    db_name=db_name,
+                    label_list=['driving_%04i' % ii for ii in range(40)],
+                    step_size=5,
+                )
+                # our saved targets are 3D but we only care about x and y
+                training_targets = training_targets[:, 0:2]
 
-            else:
+                # do our resizing, scaling, and flattening
+                training_images = dl_utils.preprocess_images(
+                    image_data=training_images,
+                    show_resized_image=False,
+                    flatten=True,
+                    normalize=False,
+                    res=res,
+                )
+                np.savez_compressed(
+                    "%s/%s_driving_training_images_processed" % (data_dir, db_name),
+                    images=training_images,
+                    targets=training_targets,
+                )
+        else:
+            try:
+                processed_data = np.load("%s/%s_training_images_processed.npz" % (data_dir, db_name))
+                training_images = processed_data["images"]
+                training_targets = processed_data["targets"]
+                print("Processed training images loaded from file...")
+            except FileNotFoundError:
+                print("Processed training images not found, generating...")
+                # load raw data
                 training_images, training_targets = dl_utils.load_data(
                     db_name=db_name, label="training_0000", n_imgs=n_training
                 )
+                # our saved targets are 3D but we only care about x and y
+                training_targets = training_targets[:, 0:2]
 
-            # our saved targets are 3D but we only care about x and y
-            training_targets = training_targets[:, 0:2]
-
-            # do our resizing, scaling, and flattening
-            training_images = dl_utils.preprocess_images(
-                image_data=training_images,
-                show_resized_image=False,
-                flatten=True,
-                normalize=False,
-                res=res,
-            )
-            np.savez_compressed(
-                "%s/%s_training_images_processed" % (data_dir, db_name),
-                images=training_images,
-                targets=training_targets,
-            )
+                # do our resizing, scaling, and flattening
+                training_images = dl_utils.preprocess_images(
+                    image_data=training_images,
+                    show_resized_image=False,
+                    flatten=True,
+                    normalize=False,
+                    res=res,
+                )
+                np.savez_compressed(
+                    "%s/%s_training_images_processed" % (data_dir, db_name),
+                    images=training_images,
+                    targets=training_targets,
+                )
 
         # repeat and batch our data
         training_images = dl_utils.repeat_data(
@@ -486,13 +514,8 @@ if __name__ == "__main__":
     else:
 
         synapse = None  # 0.001
-        # weights = "%s/data/rover_training_0004/loihirelunoise/400/epoch_14" % data_dir
-        # weights = "%s/data/%s/loihirelu/400/epoch_374" % (data_dir, db_name)
-        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_44"
-        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_64"
-        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_10"
-        # weights = "/home/tdewolf/Downloads/data/abr_analyze/relu/1/epoch_31"
-        weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_999"
+        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_260"
+        weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_108"
 
         with tf.keras.backend.learning_phase_scope(1) if use_dl_rate else nullcontext():
             sim, net = vision.convert(
@@ -530,7 +553,8 @@ if __name__ == "__main__":
             print("data shape: ", data[vision.nengo_dense].shape)
             print("validation targets size: ", validation_targets.shape)
             dl_utils.plot_prediction_error(
-                predictions=np.asarray(data[vision.nengo_dense]),
+                # predictions=np.asarray(data[vision.nengo_dense]),
+                predictions=np.asarray(data[vision.probe_dense]),
                 target_vals=validation_targets,
                 save_folder=save_folder,
                 save_name="%s_prediction_error" % mode,

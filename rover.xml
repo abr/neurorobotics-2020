@@ -198,6 +198,8 @@
 
     <actuator>
         <motor name="Turn" joint="joint0"/>
+        <motor name="FR_motor" joint="joint1"/>
+        <motor name="FL_motor" joint="joint2"/>
         <motor name="BR_motor" joint="joint3"/>
         <motor name="BL_motor" joint="joint4"/>
     </actuator>

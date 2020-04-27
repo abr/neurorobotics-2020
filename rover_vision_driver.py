@@ -73,9 +73,10 @@ def demo(backend="cpu", test_name='validation_0000'):
     # data collection parameters
     # in steps (1ms/step)
     render_frequency = 1
-    save_frequency = 10
-    reaching_steps = 3000
-    total_images_saved = 1000
+    save_frequency = 1
+    reaching_steps = None
+    total_images_saved = 100000
+    max_time_to_target = 10000
 
     # network parameters
     n_dof = 3  # 2 wheels to control
@@ -92,6 +93,7 @@ def demo(backend="cpu", test_name='validation_0000'):
             'render_frequency': render_frequency,
             'save_frequency': save_frequency,
             'reaching_steps': reaching_steps,
+            'max_time_to_target': max_time_to_target,
             'render_size': render_size,
             'dist_limit': dist_limit,
             'angle_limit': angle_limit
@@ -135,6 +137,7 @@ def demo(backend="cpu", test_name='validation_0000'):
         net.count = 0
         net.image_count = 0
         net.target_count = 0
+        net.time_to_target = 0
         net.predicted_xy = [0, 0]
         start = timeit.default_timer()
 
@@ -145,12 +148,14 @@ def demo(backend="cpu", test_name='validation_0000'):
         vision = RoverVision(res=res, seed=0)
         visionsim, visionnet = vision.convert(
             gain_scale=400,
-            # activation=nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
-            activation=LoihiRectifiedLinear(),
+            activation=nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
+            # activation=LoihiRectifiedLinear(),
             synapse=None,#0.001,
         )
         visionsim.load_params(
-            "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_999"
+            # "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_484"
+            # "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_295"
+            "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_108"
         )
         with visionsim:
             visionsim.freeze_params(visionnet)
@@ -158,8 +163,10 @@ def demo(backend="cpu", test_name='validation_0000'):
         image_input = np.zeros((res[0], res[1], 3))
 
         def sim_func(t, x):
-            u = x[:3]
-            prediction = x[3:5]
+            turn = x[0]
+            wheels = x[1]
+            u = np.array([turn, wheels, wheels, wheels, wheels])
+            prediction = x[2:4]
 
             # get our image data
             if net.count % render_frequency == 0:
@@ -223,8 +230,11 @@ def demo(backend="cpu", test_name='validation_0000'):
                 glfw.destroy_window(viewer.window)
                 raise ExitSim
 
+            rover_xyz = robot_config.Tx('EE')
             # update our target
-            if net.count % reaching_steps == 0:
+            # if net.count % reaching_steps == 0:
+            dist = np.linalg.norm(rover_xyz - viewer.target)
+            if (dist < 0.3 or net.time_to_target > max_time_to_target or net.count == 0):
                 # generate test set
                 # phis = np.linspace(-3.14, 3.14, 100)
                 # phis = np.tile(phis, 10)
@@ -243,13 +253,15 @@ def demo(backend="cpu", test_name='validation_0000'):
                 ]
                 interface.set_mocap_xyz("target", viewer.target)
                 net.target_count += 1
+                net.time_to_target = 0
+            net.time_to_target += 1
 
             # track data
             net.target_track.append(viewer.target)
-            net.rover_track.append(robot_config.Tx('EE'))
+            net.rover_track.append(np.copy(rover_xyz))
 
             # send to mujoco, stepping the sim forward --------------------------------
-            interface.send_forces(np.asarray(u))
+            interface.send_forces(u)
 
             if net.count % 500 == 0:
                 print("Time Since Start: ", timeit.default_timer() - start)
@@ -280,18 +292,18 @@ def demo(backend="cpu", test_name='validation_0000'):
             kp = 1
             kv = 0.8
             u0 = kp * (turn_des - q) - kv * dq
-            u = np.array([u0, wheels, wheels, error[0], error[1]])
+            u = np.array([u0, wheels, error[0], error[1]])
             return u
 
         # -----------------------------------------------------------------------------
-        sim = nengo.Node(sim_func, size_in=5, size_out=3)
+        sim = nengo.Node(sim_func, size_in=4, size_out=3)
 
         n_motor_neurons = 1000
         encoders = nengo.dists.UniformHypersphere(surface=True).sample(
             n_motor_neurons, d=n_input
         )
         motor_control = nengo.Ensemble(
-            neuron_type=nengo.Direct(),
+            # neuron_type=nengo.Direct(),
             n_neurons=n_motor_neurons,
             dimensions=n_input,
             radius=np.sqrt(n_input),
@@ -300,7 +312,7 @@ def demo(backend="cpu", test_name='validation_0000'):
         )
 
         # send vision prediction to motor control
-        nengo.Connection(vision.nengo_output, motor_control[3:], synapse=0.005)
+        nengo.Connection(vision.nengo_output, motor_control[3:], synapse=0.01)
 
         # send motor feedback to motor control
         nengo.Connection(sim[:3], motor_control[:3], synapse=None)
@@ -309,7 +321,7 @@ def demo(backend="cpu", test_name='validation_0000'):
         nengo.Connection(
             motor_control,
             # onchip_output,
-            sim[:5],
+            sim[:4],
             function=steering_function
         )
 
@@ -317,7 +329,7 @@ def demo(backend="cpu", test_name='validation_0000'):
 
 
 if __name__ == "__main__":
-    for ii in range(29, 30):
+    for ii in range(43, 44):
         print('\n\nBeginning round ', ii)
         net, robot_config = demo(backend, test_name='driving_%04i' % ii)
         try:
