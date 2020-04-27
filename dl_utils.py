@@ -125,7 +125,7 @@ def repeat_data(data, batch_data=False, n_steps=1):
     return data
 
 
-def load_data(db_name, label='training_0000', n_imgs=None):
+def load_data(db_name, label='training_0000', n_imgs=None, thresh=1e5, step_size=1):
     """
     loads rgb images and targets from an hdf5 database and returns them as a np array
 
@@ -152,21 +152,25 @@ def load_data(db_name, label='training_0000', n_imgs=None):
     dat = DataHandler(db_name)
 
     # load training images
-    training_images = []
-    training_targets = []
+    images = []
+    targets = []
 
     keys = np.array([int(val) for val in dat.get_keys('%s/data' % label)])
+    n_imgs = max(keys) if n_imgs is None else n_imgs
     print('Total number of images in dataset: ', max(keys))
 
-    for nn in range(n_imgs):
+    for nn in range(0, n_imgs, step_size):
         data = dat.load(parameters=['rgb', 'target'], save_location='%s/data/%04d' % (label, nn))
-        training_images.append(data['rgb'])
-        training_targets.append(data['target'])
+        if np.linalg.norm(data['target']) < thresh:
+            images.append(data['rgb'])
+            targets.append(data['target'])
 
-    training_images = np.asarray(training_images)
-    training_targets = np.asarray(training_targets)
+    images = np.asarray(images)
+    targets = np.asarray(targets)
 
-    return training_images, training_targets
+    print('Total number of images within threshold: ', images.shape[0])
+
+    return images, targets
 
 
 def plot_data(db_name, label='training_0000', n_imgs=None):
@@ -435,3 +439,44 @@ def plot_training_errors():
         data=save_data,
         save_location=save_folder,
         overwrite=True)
+
+def consolidate_data(db_name, label_list, thresh=3.5, step_size=1):
+    """
+    loads rgb images and targets from multiple hdf5 database and consolidates them
+    into a single np array, saves back to the database under the specified label
+
+    Parameters
+    ----------
+    db_name: string
+        name of database to load from
+    label_list: list
+        list of locations in database to load from
+    """
+    dat = DataHandler(db_name)
+
+    all_images = []
+    all_targets = []
+
+    for ii, label in enumerate(label_list):
+        print('db_name: ', db_name)
+        print('label: ', label)
+        images, targets = load_data(
+            db_name, label=label, thresh=thresh,
+            step_size=1 if ii in [30, 31] else step_size,
+        )
+        all_images.append(images)
+        all_targets.append(targets)
+
+    all_images = np.vstack(all_images)
+    all_targets = np.vstack(all_targets)
+
+    print('Total images shape: ', all_images.shape)
+    print('Total targets shape: ', all_targets.shape)
+
+    return all_images, all_targets
+
+    # dat.save(
+    #     data={'rgb': all_images, 'target': all_targets},
+    #     save_location=save_label,
+    #     overwrite=True
+    # )
