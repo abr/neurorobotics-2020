@@ -90,18 +90,17 @@
             <!-- turning axl -->
             <body name="turning_axl" pos="-0.1 0 0.05">
                 <geom name="turning_axl_cyl" type="cylinder" size="0.015 0.025" pos="0 0 0" material="light_grey" contype="2" conaffinity="2"/>
-                <!-- <joint name="joint0" axis="0 0 1" pos="0 0 0" limited="true" range="&#45;0.6 0.6"/> -->
                 <!-- front axl -->
                 <body name="front_axl" pos="0 0 -0.02">
                     <geom name="front_axl" type="cylinder" pos="0 0 0" material="blue_steel" size="0.015 0.15" euler="1.57 0 0" contype="16" conaffinity="16"/>
                     <!-- front right axl -->
                     <body name="FR_axl_box" pos="0 0.12 0">
                         <geom name="FR_axl_box" type="box" size="0.025 0.015 0.025" pos="0 0 0" material="light_grey" contype="16" conaffinity="16"/>
-                        <joint name="FR_joint0" axis="0 0 1" pos="0 0 0" damping="0.01" limited="true" range="-.7 .7"/>
                         <!-- front right wheel -->
                         <body name="FR_wheel" pos="0 0.045 -0.065">
-                            <geom name="FR_wheel" type="cylinder" pos="0 0 0" material="carbon" size="0.05 0.015" euler="1.57 0 0"/>
+                            <joint name="FR_joint0" axis="0 0 1" pos="0 0 0" damping="0.01" limited="true" range="-.7 .7"/>
                             <joint name="FR_joint1" axis="0 -1 0" pos="0 0 0" damping="0.01"/>
+                            <geom name="FR_wheel" type="cylinder" pos="0 0 0" material="carbon" size="0.05 0.015" euler="1.57 0 0"/>
                             <geom name="FR_hub" type="cylinder" pos="0 0.0151 0" material="light_grey" size="0.03 0.001" euler="1.57 0 0"/>
                             <geom name="FR_nut1" type="cylinder" pos="0 0.0152 0.02" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
                             <geom name="FR_nut2" type="cylinder" pos="0 0.0152 -0.02" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
@@ -112,10 +111,10 @@
                     <!-- front left axl -->
                     <body name="FL_axl_box" pos="0 -0.12 0">
                         <geom name="FL_axl_box" type="box" size="0.025 0.015 0.025" pos="0 0 0" material="light_grey" contype="16" conaffinity="16"/>
-                        <joint name="FL_joint0" axis="0 0 1" pos="0 0 0" damping="0.01" limited="true" range="-.7 .7"/>
                         <!-- front left wheel -->
                         <body name="FL_wheel" pos="0 -0.045 -0.065">
                             <geom name="FL_wheel" type="cylinder" pos="0 0 0" material="carbon" size="0.05 0.015" euler="1.57 0 0"/>
+                            <joint name="FL_joint0" axis="0 0 1" pos="0 0 0" damping="0.01" limited="true" range="-.7 .7"/>
                             <joint name="FL_joint1" axis="0 -1 0" pos="0 0 0" damping="0.01"/>
                             <geom name="FL_hub" type="cylinder" pos="0 -0.0151 0" material="light_grey" size="0.03 0.001" euler="1.57 0 0"/>
                             <geom name="FL_nut1" type="cylinder" pos="0 -0.0152 0.02" material="blue_steel" size="0.005 0.001" euler="1.57 0 0"/>
