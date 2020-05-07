@@ -5,26 +5,18 @@ To run the demo with Nengo running on cpu:
 To run the demo with Nengo on loihi
     NXSDKHOST=loihighrd python nengo_rover.py
 """
-import math
-import tensorflow as tf
-import keras
-import nengo_dl
 import glfw
+import matplotlib.pyplot as plt
+import numpy as np
+import sys
+import timeit
+
 import mujoco_py
 import nengo
+import nengo_dl
 import nengo_loihi
-import numpy as np
-import os
-import sys
-import time
-import timeit
-import matplotlib.pyplot as plt
-import cv2
-import sys
-
-import mujoco_py as mjp
 from nengo_loihi import decode_neurons
-import nengo_loihi
+
 from abr_control.arms.mujoco_config import MujocoConfig
 from abr_control.interfaces.mujoco import Mujoco
 from abr_control._vendor.nengolib.stats import ScatteredHypersphere, spherical_transform
@@ -38,28 +30,21 @@ class ExitSim(Exception):
     print("Restarting simulation")
     pass
 
-
 # set up parameters that depend on cpu or loihi as the backend
 backend = "cpu"
-adapt_scale = 1
 if len(sys.argv) > 1:
     if sys.argv[1] == "loihi":
         backend = "loihi"
-        # TODO do we need to change adapt_scale for loihi
-
-pes_learning_rate = 1e-5
-if len(sys.argv) > 1:
-    for arg in sys.argv:
-        arg = str(arg)
-        if arg == "loihi":
-            backend = "loihi"
-            adapt_scale = 10
-            pes_learning_rate = 1e-5  # sometimes needs to be scaled
 print("Using %s as backend" % backend)
-
 
 generate_data = True
 plot_mounted_camera_freq = None  # = None to not plot
+
+# scale down and bias the input from the sim node to be in -1 to 1 range
+means = np.array([0.061, -0.203, 0.1])
+scales = np.array([0.85, 2.0, 0.75])
+# Steering input mins:  [-0.92, -2.138, -0.694, -22.481, -2.849, -3.344]
+# Steering input maxs:  [1.33, 2.224, 0.679, 18.685, 3.245, 2.112]
 
 def demo(backend="cpu", test_name='validation_0000', neural_vision=True):
     if backend == "loihi":
@@ -81,7 +66,7 @@ def demo(backend="cpu", test_name='validation_0000', neural_vision=True):
 
     # network parameters
     n_dof = 3  # 2 wheels to control
-    n_input = 6  # input to neural net is body_com x, y velocity, error along (x, y) plane, and q dq feedback
+    n_input = 5  # input to neural net is body_com x, y velocity, error along (x, y) plane, and q feedback
     n_output = n_dof  # output from neural net is torque signals for the wheels
     # we stack feedback from 4 cameras to get a 2pi view
     render_size = [32, 32]
@@ -108,7 +93,6 @@ def demo(backend="cpu", test_name='validation_0000', neural_vision=True):
     robot_config = MujocoConfig(folder="", xml_file=rover_name, use_sim_state=True)
 
     net = nengo.Network()
-    net.config[nengo.Connection].synapse = None
     # create our Mujoco interface
     net.interface = Mujoco(robot_config, dt=0.001, visualize=True,
                            create_offscreen_rendercontext=True)
@@ -141,6 +125,9 @@ def demo(backend="cpu", test_name='validation_0000', neural_vision=True):
     net.interface.viewer.target = np.array([-0.4, 0.5, 0.2])
 
     with net:
+        if backend == "loihi":
+            nengo_loihi.add_params(net)
+
         net.count = 0
         net.image_count = 0
         net.target_count = 0
@@ -148,12 +135,15 @@ def demo(backend="cpu", test_name='validation_0000', neural_vision=True):
         net.predicted_xy = [0, 0]
         start = timeit.default_timer()
 
+
         # track position
         net.target_track = []
         net.rover_track = []
         net.turnerror_track = []
         net.q_track = []
         net.qdes_track = []
+        net.input_track = []
+        net.u_track = []
 
         image_input = np.zeros((res[0], res[1], 3))
         vision = RoverVision(res=res, seed=0)
@@ -165,18 +155,24 @@ def demo(backend="cpu", test_name='validation_0000', neural_vision=True):
                 synapse=None,#0.001,
             )
             visionsim.load_params(
-                # "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_484"
-                # "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_295"
-                "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_108"
+                # "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_108"
+                # "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_218"
+                "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_306"
             )
             with visionsim:
                 visionsim.freeze_params(visionnet)
-            _, visionnet = vision.convert_nengodl_to_nengo(visionnet)
+            _, visionnet = vision.convert_nengodl_to_nengo(visionnet, loihi=True)
+
+        # net.config[vision.nengo_conv0.ensemble].on_chip = False
+        # print('vision conv0 on chip: ', net.config[vision.nengo_conv0.ensemble].on_chip)
 
         def sim_func(t, x):
-            turn = x[0]
-            wheels = x[1]
+            # NOTE: radius of nengo_loihi decoder_neurons is 1
+            # so output from steering_wheel is in that range, scale back up here
+            turn = x[0] * 2 * np.pi * 5000  # also scale by kp = 5000
+            wheels = x[1] * 20 * 50
             u = np.array([turn, wheels])
+            net.u_track.append(u)
             prediction = x[2:4]
 
             # get our image data
@@ -281,10 +277,12 @@ def demo(backend="cpu", test_name='validation_0000', neural_vision=True):
                 body_com_vel[0],
                 body_com_vel[1],
                 feedback['q'][0] * (1 if rover_name == 'rover.xml' else -1),
-                feedback['dq'][0] * (1 if rover_name == 'rover.xml' else -1),
                 local_target[0],
-                local_target[1]
+                local_target[1],
             ])
+
+            # scale down for sending into motor_control ensemble
+            output_signal[:3] = (output_signal[:3] - means) / scales
 
             if net.count % 500 == 0:
                 print("Time Since Start: ", timeit.default_timer() - start)
@@ -293,116 +291,146 @@ def demo(backend="cpu", test_name='validation_0000', neural_vision=True):
             return output_signal
 
         def steering_function(x):
+            if net.count > 0:
+                net.input_track.append(x)
+
+            error = x[3:] * np.pi  # take out the error signal from vision
+            # scale up input from sim that has been scaled down to -1 to 1 range
+            x = x[:3] * scales + means
             body_com_vel = np.linalg.norm(x[:2])
             q = x[2]
-            dq = x[3]
-            error = x[4:]
-            # print('error: %2.3f, %2.3f' % (error[0], error[1]))
 
             dist = np.linalg.norm(error * 100)
 
             # input to arctan2 is modified to account for (x, y) axes of rover vs
             # the (x, y) axes of the environment
-            # turn_des = np.arctan2(-error[0], abs(error[1]))
             turn_des = np.arctan2(-error[0], abs(error[1]))
 
             # set a max speed of the robot, but when we get close slow down
             # based on how far away the target is
-            wheels = min(dist, 50)#(1 if rover_name == 'rover.xml' else 100))
-            # if dist < 1:
-            #     wheels = dist**2
+            wheels = min(dist, 50)
             wheels -= body_com_vel
             wheels *= 20  # account for point mass
             if error[1] > 0:
                 wheels *= -1
 
-            print('turn des : %.3f' % turn_des)
-            print('current angle: %.3f ' % q)
-            print('error: %.3f' % (turn_des - q))
+            # print('turn des : %.3f' % turn_des)
+            # print('current angle: %.3f ' % q)
+            # print('error: %.3f' % (turn_des - q))
 
-            net.turnerror_track.append(turn_des - q)
-            net.q_track.append(q)
-            net.qdes_track.append(turn_des)
+            u0 = (turn_des - q)
 
-            kp = 5000 #if rover_name == 'rover.xml' else 5000
-            kv = 0#np.sqrt(kp)
-            u0 = kp * (turn_des - q) - kv * dq
+            # normalize output for loihi decodeneurons by / max value possible
+            wheels /= (50 * 20)
+            u0 /= (2 * np.pi)
+
             u = np.array([
                 u0 * (1 if rover_name == 'rover.xml' else -1),
                 wheels * (-1 if rover_name == 'rover.xml' else 1)
             ])
+
+            # record input for finding mean and variance values
+            if net.count > 0:
+                net.turnerror_track.append(turn_des - q)
+                net.q_track.append(q)
+                net.qdes_track.append(turn_des)
+
             return u
 
         # -----------------------------------------------------------------------------
-        sim = nengo.Node(sim_func, size_in=4, size_out=6)
+        sim = nengo.Node(sim_func, size_in=4, size_out=n_input, label='sim')
 
-        n_motor_neurons = 1000
-        encoders = nengo.dists.UniformHypersphere(surface=True).sample(
-            n_motor_neurons, d=n_input
-        )
+        a = nengo.Ensemble(1, 100)
+
+        n_motor_neurons = 10000
         motor_control = nengo.Ensemble(
             # neuron_type=nengo.Direct(),
+            neuron_type=nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
             n_neurons=n_motor_neurons,
             dimensions=n_input,
+            # the input is mean subtracted and scaled to be between -1 and 1,
             radius=np.sqrt(n_input),
-            encoders=encoders,
-            seed=seed,
+            # seed=seed,
+            label='motor_control',
         )
 
-        def print_func(t, x):
-            # print(x)
-            return x
-        relay = nengo.Node(print_func, size_in=2)
+        # create ensemble for decoding into and reading the signal off of Loihi through
+        output_decodeneurons = decode_neurons.Preset10DecodeNeurons()
+        onchip_output = output_decodeneurons.get_ensemble(dim=2)
+        onchip_output.radius = np.sqrt(2)
+
         # send motor signal to sim
-        nengo.Connection(
+        conn = nengo.Connection(
             motor_control,
-            relay,
-            function=steering_function,
-            synapse=None,
-        )
-        nengo.Connection(
-            relay,
             sim[:2],
+            function=steering_function,
             synapse=0,
         )
 
-        # adapt = nengo.Ensemble(
-        #     n_neurons=1000,
-        #     # the context is the same input the motor_control ensemble gets
-        #     dimensions=5,
-        #     radius=np.sqrt(5),
-        # )
-        # set up learning connection
-        # conn = nengo.Connection(
-        #     adapt.neurons,
-        #     sim[:1],
-        #     transform=np.zeros((1, adapt.n_neurons)),
-        #     learning_rule_type=nengo.PES(learning_rate=1e-3),
-        # )
-        # nengo.Connection(relay[:1], conn.learning_rule, transform=-1)
+        # from nengo.builder.connection import build_decoders
+        # _, decoders.T, solver_info = build_decoders(net, conn, np.random.RandomState(0))
+        # print(solver_info)
 
+
+        relay_motor_input = nengo.Node(size_in=n_input)
+        nengo.Connection(relay_motor_input, motor_control, synapse=None)
 
         # send vision prediction to motor control
-        if neural_vision:
-            nengo.Connection(vision.nengo_output, motor_control[4:], synapse=0.01)
-            nengo.Connection(vision.nengo_output, sim[2:4], synapse=0.01)
-            # nengo.Connection(vision.nengo_output, adapt[4:], synapse=0.01)
-        else:
-            nengo.Connection(sim[4:], motor_control[4:], synapse=0.01)
-            nengo.Connection(sim[4:], sim[2:4], synapse=0.01)
-            # nengo.Connection(sim[4:], adapt[4:], synapse=0.01)
+        vision_synapse = 0.01
+        # if neural_vision:
+        #     relay = nengo.Node(size_in=2, label='relay')
+        #     nengo.Connection(vision.nengo_output, relay, synapse=vision_synapse)
+        #     nengo.Connection(relay, relay_motor_input[3:], synapse=None)
+        #     nengo.Connection(relay, sim[2:4], synapse=None)
+        # else:
+        nengo.Connection(sim[3:], relay_motor_input[3:], synapse=vision_synapse, transform=1/np.pi)
+        nengo.Connection(sim[3:], sim[2:4], synapse=vision_synapse)
 
         # send motor feedback to motor control
-        nengo.Connection(sim[:4], motor_control[:4], synapse=None)
-        # nengo.Connection(sim[:4], adapt[:4], synapse=None)
+        nengo.Connection(sim[:3], relay_motor_input[:3], synapse=0)
 
-    return net, robot_config
+        motor_control_direct = nengo.Ensemble(
+            neuron_type=nengo.Direct(),
+            n_neurons=n_motor_neurons,
+            dimensions=n_input,
+            label='motor_control_direct',
+        )
+
+        dead_end = nengo.Node(size_in=2, label='dead_end')
+        # send motor signal to sim
+        nengo.Connection(
+            motor_control_direct,
+            dead_end,
+            function=steering_function,
+            transform=[[5000 * 2 * np.pi, 0], [0, 20 * 50]],
+            synapse=0,
+        )
+
+        node = nengo.Node(1)
+        nengo.Connection(node, dead_end[0])
+
+        # send vision prediction to motor control
+        vision_synapse = 0.01
+        # if neural_vision:
+        #     nengo.Connection(relay, motor_control_direct[3:], synapse=None)
+        # else:
+        nengo.Connection(sim[3:], motor_control_direct[3:], synapse=vision_synapse, transform=1/np.pi)
+
+        # send motor feedback to motor control
+        nengo.Connection(sim[:3], motor_control_direct[:3], synapse=0)
+        net.dead_end_probe = nengo.Probe(dead_end)
+
+        # TODO: set up decodeneurons optimally tuned for 4d output, each d range -1:1
+
+    return net
 
 
 if __name__ == "__main__":
-    for ii in range(43, 44):
+    for ii in range(45, 46):
         print('\n\nBeginning round ', ii)
-        net, robot_config = demo(backend, test_name='driving_%04i' % ii)
+        net = demo(backend, test_name='driving_%04i' % ii, neural_vision=False)
+        for conn in net.all_connections:
+            print(conn)
         try:
             if backend == "loihi":
                 sim = nengo_loihi.Simulator(net, target="sim")
@@ -412,13 +440,14 @@ if __name__ == "__main__":
                 sim = nengo.Simulator(net, progress_bar=False)
 
             while 1:
-                sim.run(1e5)
+                sim.run(.1)
 
         except ExitSim:
             pass
 
         finally:
             net.interface.disconnect()
+            direct = sim.data[net.dead_end_probe]
             sim.close()
 
             # plot data
@@ -436,6 +465,26 @@ if __name__ == "__main__":
             plt.plot(qdes, '--', label='qdes')
             plt.plot(error, 'r', label='error')
             plt.legend()
+
+            plt.figure()
+            plt.title('Control signal u')
+            plt.plot(np.array(net.u_track), alpha=.5)
+            plt.gca().set_prop_cycle(None)
+            plt.plot(direct, '--', lw=3)
+
+            # NOTE: ignore this plot if the motor_control ensemble is running with neurons
+            # because it will just be the output from calculating the decoders
+            plt.figure()
+            inputs = np.array(net.input_track)
+            for ii in range(inputs.shape[1]):
+                plt.subplot(inputs.shape[1], 1, ii+1)
+                plt.plot(inputs[:, ii])
+            plt.suptitle('Motor inputs')
+
+            print('Steering input means: ', [float('%.3f' % val) for val in np.mean(inputs, axis=0)])
+            print('Steering input mins: ', [float('%.3f' % val) for val in np.min(inputs, axis=0)])
+            print('Steering input maxs: ', [float('%.3f' % val) for val in np.max(inputs, axis=0)])
+
             plt.show()
 
 else:

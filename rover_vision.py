@@ -97,7 +97,7 @@ class RoverVision:
             filters=3,
             kernel_size=1,
             strides=1,
-            # use_bias=False,
+            use_bias=False,
             activation=tf.nn.relu,
             data_format="channels_last",
         )(self.input)
@@ -106,7 +106,7 @@ class RoverVision:
             filters=32,
             kernel_size=5,
             strides=1,
-            # use_bias=False,
+            use_bias=False,
             activation=tf.nn.relu,
             data_format="channels_last",
         )(self.conv0)
@@ -141,17 +141,17 @@ class RoverVision:
         net = converter.net
 
         self.nengo_innode = converter.layers[self.input]
-        nengo_conv0 = converter.layers[self.conv0]
+        self.nengo_conv0 = converter.layers[self.conv0]
         nengo_conv1 = converter.layers[self.conv1]
         self.nengo_output = converter.layers[self.dense]
 
         with net:
             # set our biases to non-trainable to make sure they're always 0
-            net.config[nengo_conv0].trainable = False
+            net.config[self.nengo_conv0].trainable = False
             net.config[nengo_conv1].trainable = False
 
             # set up probes so that we can add the firing rates to the cost function
-            self.probe_conv0 = nengo.Probe(nengo_conv0, label="probe_conv0")
+            self.probe_conv0 = nengo.Probe(self.nengo_conv0, label="probe_conv0")
             self.probe_conv1 = nengo.Probe(nengo_conv1, label="probe_conv1")
             self.probe_dense = nengo.Probe(self.nengo_output, label="probe_dense", synapse=0.005)
 
@@ -174,18 +174,19 @@ class RoverVision:
         with net:
             if loihi:
                 nengo_loihi.add_params(net)
-                net.config[self.conv0].on_chip = False
-            # create out input node
+                net.config[self.nengo_conv0.ensemble].on_chip = False
+            # create our input node
             self.nengo_innode.size_out = self.subpixels
             self.nengo_innode.output = send_image_in
 
         # overwrite the nengo_dl simulator with the nengo simulator
-        if loihi:
-            sim = nengo_loihi.Simulator(net, dt=self.dt)
-        else:
-            sim = nengo.Simulator(net, dt=self.dt)
+        # if loihi:
+        #     sim = nengo_loihi.Simulator(net, dt=self.dt)
+        # else:
+        #     sim = nengo.Simulator(net, dt=self.dt)
 
-        return sim, net
+        # return sim, net
+        return None, net
 
     def train(
         self,
@@ -335,6 +336,7 @@ if __name__ == "__main__":
     seed = np.random.randint(1e5)
     data_dir = "/home/tdewolf/Downloads"
     driving_data = True  # use data collected while driving around
+    normalize_targets = True  # change the target range to -1:1 instead of -pi:pi
 
     # using baseline of 1ms timesteps to define n_steps
     # adjust based on dt to keep sim time constant
@@ -353,11 +355,13 @@ if __name__ == "__main__":
     # load our raw data
     validation_images, validation_targets = dl_utils.load_data(
         # db_name=db_name, label="validation_0000", n_imgs=n_validation
-        db_name=db_name, label="driving_0040", n_imgs=10000,
+        db_name=db_name, label="driving_0044", n_imgs=1200,
     )
 
     # our saved targets are 3D but we only care about x and y
     validation_targets = validation_targets[:, 0:2]
+    if normalize_targets:
+        validation_targets /= np.pi
 
     # do our resizing, scaling, and flattening
     validation_images = dl_utils.preprocess_images(
@@ -399,7 +403,7 @@ if __name__ == "__main__":
     if mode == "train":
 
         n_training_steps = 1
-        epochs = [0, 1000]
+        epochs = [284, 1000]
 
         # prepare training data ------------------------------------
         if driving_data:
@@ -407,11 +411,14 @@ if __name__ == "__main__":
                 processed_data = np.load("%s/%s_driving_training_images_processed.npz" % (data_dir, db_name))
                 training_images = processed_data["images"]
                 training_targets = processed_data["targets"]
+                if normalize_targets:
+                    training_targets /= np.pi
                 print("Processed training images loaded from file...")
+
             except FileNotFoundError:
                 training_images, training_targets = dl_utils.consolidate_data(
                     db_name=db_name,
-                    label_list=['driving_%04i' % ii for ii in range(40)],
+                    label_list=['driving_%04i' % ii for ii in range(45)],
                     step_size=5,
                 )
                 # our saved targets are 3D but we only care about x and y
@@ -435,7 +442,10 @@ if __name__ == "__main__":
                 processed_data = np.load("%s/%s_training_images_processed.npz" % (data_dir, db_name))
                 training_images = processed_data["images"]
                 training_targets = processed_data["targets"]
+                if normalize_targets:
+                    training_targets /= np.pi
                 print("Processed training images loaded from file...")
+
             except FileNotFoundError:
                 print("Processed training images not found, generating...")
                 # load raw data
@@ -515,7 +525,8 @@ if __name__ == "__main__":
 
         synapse = None  # 0.001
         # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_260"
-        weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_108"
+        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_108"
+        weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_218"
 
         with tf.keras.backend.learning_phase_scope(1) if use_dl_rate else nullcontext():
             sim, net = vision.convert(
