@@ -5,7 +5,6 @@ import sys
 
 from contextlib import nullcontext
 
-# import nengo_loihi
 import keras
 import cv2
 import warnings
@@ -116,7 +115,7 @@ class RoverVision:
 
         self.model = tf.keras.Model(inputs=self.input, outputs=self.dense)
 
-    def convert(self, gain_scale, activation, synapse=None):
+    def convert(self, gain_scale, activation, synapse=None, training=True):
         """
         gain_scale: int
             scaling factor for spiking network to increase the amount of activity.
@@ -145,15 +144,16 @@ class RoverVision:
         nengo_conv1 = converter.layers[self.conv1]
         self.nengo_output = converter.layers[self.dense]
 
-        with net:
-            # set our biases to non-trainable to make sure they're always 0
-            net.config[self.nengo_conv0].trainable = False
-            net.config[nengo_conv1].trainable = False
+        if training:
+            with net:
+                # set our biases to non-trainable to make sure they're always 0
+                net.config[self.nengo_conv0].trainable = False
+                net.config[nengo_conv1].trainable = False
 
-            # set up probes so that we can add the firing rates to the cost function
-            self.probe_conv0 = nengo.Probe(self.nengo_conv0, label="probe_conv0")
-            self.probe_conv1 = nengo.Probe(nengo_conv1, label="probe_conv1")
-            self.probe_dense = nengo.Probe(self.nengo_output, label="probe_dense", synapse=0.005)
+                # set up probes so that we can add the firing rates to the cost function
+                self.probe_conv0 = nengo.Probe(self.nengo_conv0, label="probe_conv0")
+                self.probe_conv1 = nengo.Probe(nengo_conv1, label="probe_conv1")
+                self.probe_dense = nengo.Probe(self.nengo_output, label="probe_dense", synapse=0.005)
 
         sim = nengo_dl.Simulator(
             net, minibatch_size=self.minibatch_size, seed=self.seed
@@ -179,14 +179,14 @@ class RoverVision:
             self.nengo_innode.size_out = self.subpixels
             self.nengo_innode.output = send_image_in
 
-        # overwrite the nengo_dl simulator with the nengo simulator
-        # if loihi:
-        #     sim = nengo_loihi.Simulator(net, dt=self.dt)
-        # else:
-        #     sim = nengo.Simulator(net, dt=self.dt)
+        # replace nengo_dl simulator with the nengo or nengo_loihi simulator
+        if loihi:
+            sim = nengo_loihi.Simulator(net, dt=self.dt)
+        else:
+            sim = nengo.Simulator(net, dt=self.dt)
 
-        # return sim, net
-        return None, net
+        return sim, net
+        # return None, net
 
     def train(
         self,
@@ -331,7 +331,7 @@ if __name__ == "__main__":
     db_name = "abr_analyze"
     res = [32, 128]
     n_training = 30000  # number of images to train on
-    n_validation = 5000  # number of validation images
+    n_validation = 1200 # number of validation images
     n_validation_steps = 1
     seed = np.random.randint(1e5)
     data_dir = "/home/tdewolf/Downloads"
@@ -355,7 +355,7 @@ if __name__ == "__main__":
     # load our raw data
     validation_images, validation_targets = dl_utils.load_data(
         # db_name=db_name, label="validation_0000", n_imgs=n_validation
-        db_name=db_name, label="driving_0044", n_imgs=1200,
+        db_name=db_name, label="driving_0047", #n_imgs=115,
     )
 
     # our saved targets are 3D but we only care about x and y
@@ -526,7 +526,8 @@ if __name__ == "__main__":
         synapse = None  # 0.001
         # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_260"
         # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_108"
-        weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_218"
+        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_218"
+        weights =  "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_306"
 
         with tf.keras.backend.learning_phase_scope(1) if use_dl_rate else nullcontext():
             sim, net = vision.convert(
@@ -551,7 +552,8 @@ if __name__ == "__main__":
                     sim.freeze_params(net)
                 # if we want to run this in Nengo and not Nengo DL
                 # have to extend our network to manually inject input images
-                sim, net = vision.convert_nengodl_to_nengo(net, image_array=True)
+                sim, net = vision.convert_nengodl_to_nengo(net, image_array=True, loihi=True)
+                print('simulator: ', sim)
 
                 # the user needs to pass input image to rover_vision.image_input
                 # should be [n_timesteps, image.flatten()]
