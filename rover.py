@@ -40,7 +40,7 @@ generate_data = True
 plot_mounted_camera_freq = None  # = None to not plot
 
 
-def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
+def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visualize=True):
     if backend == "loihi":
         nengo_loihi.set_defaults()
 
@@ -90,12 +90,11 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
     net = nengo.Network()
     # create our Mujoco interface
     net.interface = Mujoco(
-        robot_config, dt=0.001, visualize=True, create_offscreen_rendercontext=True
+        robot_config, dt=0.001, visualize=visualize, create_offscreen_rendercontext=True
     )
     net.interface.connect()  # camera_id=0)
     # shorthand
     interface = net.interface
-    viewer = interface.viewer
     model = net.interface.sim.model
     data = net.interface.sim.data
     EE_id = model.body_name2id("EE")
@@ -118,7 +117,7 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
     red = [0.9, 0, 0, 1]
 
     # set up the target position
-    net.interface.viewer.target = np.array([-0.0, 0.0, 0.2])
+    net.target = np.array([-0.0, 0.0, 0.2])
 
     vision = RoverVision(res=res, seed=0)
 
@@ -189,7 +188,7 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
                 a.imshow(vision.image_input.reshape((res[0], res[1], 3)) / 255)
                 plt.show()
 
-            error = viewer.target - robot_config.Tx("EE")
+            error = net.target - robot_config.Tx("EE")
             model.geom_rgba[target_geom_id] = (
                 green if np.linalg.norm(error) < 0.02 else red
             )
@@ -230,14 +229,14 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
                     print("%s/data/%04d" % (test_name, net.image_count))
                 net.image_count += 1
 
-            if viewer.exit or net.image_count == total_images_saved:
-                glfw.destroy_window(viewer.window)
+            if (visualize and interface.viewer.exit) or net.image_count == total_images_saved:
+                glfw.destroy_window(interface.viewer.window)
                 raise ExitSim
 
             rover_xyz = robot_config.Tx("EE")
             # update our target
             # if net.count % reaching_steps == 0:
-            dist = np.linalg.norm(rover_xyz - viewer.target)
+            dist = np.linalg.norm(rover_xyz - net.target)
             if dist < 0.2 or net.time_to_target > max_time_to_target or net.count == 0:
                 # generate test set
                 # phis = np.linspace(-3.14, 3.14, 100)
@@ -254,21 +253,21 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
                     phi = np.random.uniform(low=angle_limit[0], high=angle_limit[1])
                     # radius = np.random.uniform(low=dist_limit[0], high=dist_limit[1])
                     radius = 1
-                    viewer.target = [np.cos(phi) * radius, np.sin(phi) * radius, 0.2]
-                    dist = np.linalg.norm(rover_xyz - viewer.target)
+                    net.target = [np.cos(phi) * radius, np.sin(phi) * radius, 0.2]
+                    dist = np.linalg.norm(rover_xyz - net.target)
 
-                interface.set_mocap_xyz("target", viewer.target)
+                interface.set_mocap_xyz("target", net.target)
                 net.target_count += 1
                 net.time_to_target = 0
             # theta = net.time_to_target * 0.001
             # r = 2
             # # theta = np.hstack((np.linspace(-.7, .7, 300), np.linspace(.7, -.7, 300)))[net.time_to_target % 600]
-            # viewer.target = np.array([r * (np.cos(theta)), r * -np.sin(theta), .2])
-            # interface.set_mocap_xyz("target", viewer.target)
+            # net.target = np.array([r * (np.cos(theta)), r * -np.sin(theta), .2])
+            # interface.set_mocap_xyz("target", net.target)
             net.time_to_target += 1
 
             # track data
-            net.target_track.append(viewer.target)
+            net.target_track.append(net.target)
             net.rover_track.append(np.copy(rover_xyz))
             net.localtarget_track.append(np.copy(local_target / np.pi))
 
@@ -504,7 +503,7 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
 if __name__ == "__main__":
     for ii in range(47, 48):
         print("\n\nBeginning round ", ii)
-        net = demo(backend, test_name="driving_%04i" % ii, neural_vision=True)
+        net = demo(backend, test_name="driving_%04i" % ii, neural_vision=True, visualize=False)
         for conn in net.all_connections:
             print(conn)
         for subnet in net.all_networks:
