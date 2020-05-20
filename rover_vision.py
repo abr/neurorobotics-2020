@@ -3,9 +3,14 @@ import nengo_dl
 import nengo_loihi
 import sys
 
-from contextlib import nullcontext
+if sys.version_info > (3, 6):
+    from contextlib import nullcontext
+else:
+    from contextlib import contextmanager
+    @contextmanager
+    def nullcontext(enter_result=None):
+        yield enter_result
 
-import keras
 import cv2
 import warnings
 import os
@@ -231,10 +236,10 @@ class RoverVision:
         loss = {self.nengo_dense: tf.losses.mse}
         training_targets = {self.nengo_dense: targets}
         if fr_loss_function:
-            loss[self.probe_conv0]: fr_loss_function
-            loss[self.probe_conv1]: fr_loss_function
-            train_data[self.probe_conv0]: np.zeros(targets.shape)
-            train_data[self.probe_conv1]: np.zeros(targets.shape)
+            loss[self.probe_conv0] = fr_loss_function
+            loss[self.probe_conv1] = fr_loss_function
+            train_data[self.probe_conv0] = np.zeros(targets.shape)
+            train_data[self.probe_conv1] = np.zeros(targets.shape)
 
         with sim:
             sim.compile(optimizer=tf.optimizers.RMSprop(0.001), loss=loss)
