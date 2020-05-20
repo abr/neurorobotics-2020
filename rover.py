@@ -15,7 +15,6 @@ import mujoco_py
 import nengo
 import nengo_dl
 import nengo_loihi
-from nengo_loihi import decode_neurons
 
 from abr_control._vendor.nengolib.stats import ScatteredHypersphere, spherical_transform
 from abr_control.arms.mujoco_config import MujocoConfig
@@ -23,41 +22,12 @@ from abr_control.interfaces.mujoco import Mujoco
 from abr_analyze import DataHandler
 
 from rover_vision import RoverVision
-from loihi_rate_neuron import LoihiRectifiedLinear
+from loihi_utils import LoihiRectifiedLinear, HetDecodeNeurons
 
 
 class ExitSim(Exception):
     print("Restarting simulation")
     pass
-
-
-class HetDecodeNeurons(nengo_loihi.decode_neurons.OnOffDecodeNeurons):
-    """Uses heterogeneous on/off pairs with pre-set values per dimension.
-
-    The script for configuring these values can be found at:
-        nengo-loihi-sandbox/utils/interneuron_unidecoder_design.py
-    """
-
-    def __init__(self, pairs_per_dim=500, dt=0.001, rate=None):
-        super(HetDecodeNeurons, self).__init__(
-            pairs_per_dim=pairs_per_dim, dt=dt, rate=rate
-        )
-
-        # Parameters determined by hyperopt
-        intercepts = np.linspace(-1.053, 0.523, self.pairs_per_dim)
-        max_rates = np.linspace(200, 250, self.pairs_per_dim)
-        gain, bias = self.neuron_type.gain_bias(max_rates, intercepts)
-
-        target_point = 0.947
-        target_rate = np.sum(self.neuron_type.rates(target_point, gain, bias))
-        self.scale = 1.05 * target_point / (self.dt * target_rate)
-
-        self.gain = gain.repeat(2)
-        self.bias = bias.repeat(2)
-
-    def __str__(self):
-        return "%s(dt=%0.3g, rate=%0.3g)" % (type(self).__name__, self.dt, self.rate)
-
 
 # set up parameters that depend on cpu or loihi as the backend
 backend = "cpu"

@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from abr_analyze import DataHandler
 from nengo.utils.matplotlib import rasterplot
 
-from loihi_rate_neuron import LoihiRectifiedLinear
+from loihi_utils import LoihiRectifiedLinear
 
 
 # =================== Tensorflow settings to avoid OOM errors =================
