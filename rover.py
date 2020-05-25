@@ -67,7 +67,7 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
     res = [render_size[0], render_size[1] * 4]
     subpixels = res[0] * res[1] * 3
 
-    dat = DataHandler()
+    dat = DataHandler('test')
     dat.save(
         data={
             "render_frequency": render_frequency,
@@ -84,7 +84,6 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
 
     # initialize our robot config for the jaco2
     rover_name = "rover.xml"
-    # rover_name = 'rover4We-only.xml'
     robot_config = MujocoConfig(folder="", xml_file=rover_name, use_sim_state=True)
 
     net = nengo.Network()
@@ -93,6 +92,7 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
         robot_config, dt=0.001, visualize=visualize, create_offscreen_rendercontext=True
     )
     net.interface.connect()  # camera_id=0)
+    # print(net.interface.offscreen)
     # shorthand
     interface = net.interface
     model = net.interface.sim.model
@@ -100,10 +100,7 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
     EE_id = model.body_name2id("EE")
 
     # get names of turning axel and back motors
-    if rover_name == "rover.xml":
-        joint_names = ["steering_wheel"]
-    else:
-        joint_names = ["ghost-steer-hinge"]
+    joint_names = ["steering_wheel"]
     interface.joint_pos_addrs = [
         model.get_joint_qpos_addr(name) for name in joint_names
     ]
@@ -146,12 +143,11 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
                 gain_scale=400,
                 activation=nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
                 # activation=LoihiRectifiedLinear(),
-                synapse=None,  # 0.001,
+                synapse=None,#0.001,
                 training=False,
             )
             visionsim.load_params(
-                "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_306"
-                # "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_218"
+                "epoch_999"
             )
             with visionsim:
                 visionsim.freeze_params(visionnet_1)
@@ -279,7 +275,7 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
                 [
                     # body_com_vel[0],
                     # body_com_vel[1],
-                    feedback["q"][0] * (1 if rover_name == "rover.xml" else -1),
+                    feedback["q"][0],
                     local_target[0],
                     local_target[1],
                 ]
@@ -304,25 +300,21 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
 
         # --- set up ensemble to calculate speed and direction
 
+        max_dist = .3
         def speed_function(x):
-            error = x * np.pi  # scale back up error signal from vision
-            dist = np.linalg.norm(error * 100)
+            error = x * np.pi / -max_dist # scale back up error signal from vision
+            dist = np.linalg.norm(error)
 
             # set a max speed of the robot, but when we get close slow down
             # based on how far away the target is
-            wheels = min(dist, 30)
+            wheels = min(dist, 1)
             if error[1] > 0:  # if it's behind, go backwards
                 wheels *= -1
-
-            # normalize output for loihi decodeneurons by / max value possible
-            wheels /= 30
-            wheels *= -1 if rover_name == "rover.xml" else 1
-
             return wheels
 
         motor_control_speed = nengo.Ensemble(
-            # neuron_type=nengo.Direct(),
-            neuron_type=nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
+            neuron_type=nengo.Direct(),
+            # neuron_type=nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
             n_neurons=n_motor_neurons,
             dimensions=2,
             max_rates=nengo.dists.Uniform(175, 220),
@@ -344,11 +336,6 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
             # synapse=0.005,
         )
 
-        # connect up speed
-        nengo.Connection(
-            sim[1:3], motor_control_speed, synapse=vision_synapse, transform=1 / np.pi
-        )
-
         # --- set up ensemble to calculate torque to apply to wheels
 
         def steer_function(x, track=False):
@@ -362,10 +349,7 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
             # input to arctan2 is modified to account for (x, y) axes of rover vs
             # the (x, y) axes of the environment
             turn_des = np.arctan2(-error[0], abs(error[1]))
-            u = turn_des - q
-
-            # normalize output for loihi decodeneurons by / max value possible
-            u /= 2 * (1 if rover_name == "rover.xml" else -1)
+            u = (turn_des - q) / 2
 
             # record input for finding mean and variance values
             if net.count > 0 and track:
@@ -376,8 +360,8 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
             return u
 
         motor_control_turn = nengo.Ensemble(
-            # neuron_type=nengo.Direct(),
-            neuron_type=nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
+            neuron_type=nengo.Direct(),
+            # neuron_type=nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
             n_neurons=n_motor_neurons,
             dimensions=n_input,
             max_rates=nengo.dists.Uniform(175, 220),
@@ -479,7 +463,7 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
                 sim[1:3],
                 motor_control_direct[1:],
                 synapse=vision_synapse,
-                transform=1 / np.pi,
+                transform=1 / np.pi * 0.5,
             )
         # send motor feedback to motor control
         nengo.Connection(sim[0], motor_control_direct[0], synapse=None)
@@ -501,9 +485,9 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True, visuali
 
 
 if __name__ == "__main__":
-    for ii in range(47, 48):
+    for ii in range(0, 1):
         print("\n\nBeginning round ", ii)
-        net = demo(backend, test_name="driving_%04i" % ii, neural_vision=True, visualize=False)
+        net = demo(backend, test_name="driving_%04i" % ii, neural_vision=True, visualize=True)
         for conn in net.all_connections:
             print(conn)
         for subnet in net.all_networks:
@@ -514,14 +498,19 @@ if __name__ == "__main__":
             print(node)
         try:
             if backend == "loihi":
-                sim = nengo_loihi.Simulator(net, target="sim", remove_passthrough=False)
-                #     , target="loihi", hardware_options=dict(snip_max_spikes_per_step=300)
-                # )
+                sim = nengo_loihi.Simulator(
+                    net,
+                    # target="sim",
+                    target="loihi",
+                    remove_passthrough=False,
+                    hardware_options=dict(snip_max_spikes_per_step=300),
+                )
             elif backend == "cpu":
                 sim = nengo.Simulator(net, progress_bar=False)
 
             while 1:
-                sim.run(0.1)
+                with sim:
+                    sim.run(10)
 
         except ExitSim:
             pass
@@ -551,11 +540,11 @@ if __name__ == "__main__":
             u_track = np.array(net.u_track)
             plt.title("Control signal u")
             plt.subplot(2, 1, 1)
-            plt.plot(u_track[:, 0], alpha=0.5)
-            plt.plot(direct[:, 0], "--", lw=5)
+            plt.plot(u_track[:, 0], lw=2)
+            plt.plot(direct[:, 0], "--", lw=3, alpha=0.5)
             plt.subplot(2, 1, 2)
-            plt.plot(u_track[:, 1], alpha=0.5)
-            plt.plot(direct[:, 1], "--", lw=3)
+            plt.plot(u_track[:, 1], lw=2)
+            plt.plot(direct[:, 1], "--", lw=3, alpha=.5)
 
             # NOTE: ignore this plot if the motor_control ensemble is running with neurons
             # because it will just be the output from calculating the decoders

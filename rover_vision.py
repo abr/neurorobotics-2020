@@ -107,16 +107,28 @@ class RoverVision:
         )(self.input)
 
         self.conv1 = tf.keras.layers.Conv2D(
-            filters=32,
-            kernel_size=5,
-            strides=1,
+            filters=16,
+            kernel_size=10,
+            strides=5,
             use_bias=False,
             activation=tf.nn.relu,
             data_format="channels_last",
         )(self.conv0)
 
         flatten = tf.keras.layers.Flatten()(self.conv1)
-        self.dense = tf.keras.layers.Dense(units=2, use_bias=False)(flatten)
+        self.dense0_layer = tf.keras.layers.Dense(
+            units=200,
+            use_bias=False,
+            activation=tf.nn.relu
+        )
+        self.dense0 = self.dense0_layer(flatten)
+        self.dense1_layer = tf.keras.layers.Dense(
+            units=100,
+            use_bias=False,
+            activation=tf.nn.relu
+        )
+        self.dense1 = self.dense1_layer(self.dense0)
+        self.dense = tf.keras.layers.Dense(units=2, use_bias=False)(self.dense1)
 
         self.model = tf.keras.Model(inputs=self.input, outputs=self.dense)
 
@@ -261,7 +273,11 @@ class RoverVision:
                 #         return 0.001
                 # else:
                 def scheduler(x):
-                    return 0.0001 * np.exp(0.1 * (0 - epoch//2))
+                    if epoch < 70:
+                        return 0.0001
+                    elif epoch < 90:
+                        return 0.00001
+                    return 0.000001 #* np.exp(0.1 * (0 - epoch//2))
 
                 print("Learning rate: ", scheduler(None))
 
@@ -360,7 +376,7 @@ if __name__ == "__main__":
     # load our raw data
     validation_images, validation_targets = dl_utils.load_data(
         # db_name=db_name, label="validation_0000", n_imgs=n_validation
-        db_name=db_name, label="driving_0047", #n_imgs=115,
+        db_name=db_name, label="driving_0047", n_imgs=10000, step_size=20,
     )
 
     # our saved targets are 3D but we only care about x and y
@@ -408,7 +424,7 @@ if __name__ == "__main__":
     if mode == "train":
 
         n_training_steps = 1
-        epochs = [284, 1000]
+        epochs = [0, 1000]
 
         # prepare training data ------------------------------------
         if driving_data:
@@ -421,6 +437,7 @@ if __name__ == "__main__":
                 print("Processed training images loaded from file...")
 
             except FileNotFoundError:
+                print("Processed training images not found, processing now...")
                 training_images, training_targets = dl_utils.consolidate_data(
                     db_name=db_name,
                     label_list=['driving_%04i' % ii for ii in range(45)],
@@ -529,10 +546,10 @@ if __name__ == "__main__":
     else:
 
         synapse = None  # 0.001
-        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_260"
-        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_108"
-        # weights = "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_218"
-        weights =  "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_306"
+        # weights =  "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_306"
+        # weights =  "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_88"
+        # weights =  "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_116"
+        weights =  "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_999"
 
         with tf.keras.backend.learning_phase_scope(1) if use_dl_rate else nullcontext():
             sim, net = vision.convert(
