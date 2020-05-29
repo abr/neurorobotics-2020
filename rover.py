@@ -1,5 +1,7 @@
 """
-TODO
+To generate training data to train up the RoverVision system, set generate_data=True
+
+
 To run the demo with Nengo running on cpu:
     python nengo_rover.py cpu
 
@@ -22,8 +24,7 @@ from abr_control.arms.mujoco_config import MujocoConfig
 from abr_control.interfaces.mujoco import Mujoco
 from abr_analyze import DataHandler
 
-from rover_vision import RoverVision
-from loihi_utils import LoihiRectifiedLinear, HetDecodeNeurons
+from rover_vision import RoverVision, LoihiRectifiedLinear
 
 
 class ExitSim(Exception):
@@ -31,25 +32,20 @@ class ExitSim(Exception):
     pass
 
 
-# set up parameters that depend on cpu or loihi as the backend
-backend = "cpu"
-if len(sys.argv) > 1:
-    if sys.argv[1] == "loihi":
-        backend = "loihi"
-print("Using %s as backend" % backend)
-
-generate_data = False  # should training / validation data be created
-plot_mounted_camera_freq = None  # how often to plot image from cameras
-collect_ground_truth = True  # track ideal vision and control network output
-motor_neuron_type = nengo_loihi.neurons.LoihiSpikingRectifiedLinear()
-
-
-def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
+def demo(
+    backend="cpu",
+    test_name="validation_0000",
+    collect_ground_truth=False,
+    generate_data=False,
+    motor_neuron_type=nengo_loihi.neurons.LoihiSpikingRectifiedLinear(),
+    neural_vision=True,
+    plot_mounted_camera_freq=None,
+):
     if backend == "loihi":
         nengo_loihi.set_defaults()
 
     seed = 9
-    rng = np.random.RandomState(seed)
+    np.random.seed(seed)
     # target generation limits
     dist_limit = [0.25, 3.5]
     angle_limit = [-np.pi, np.pi]
@@ -57,7 +53,6 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
     # data collection parameters in steps (1ms per step)
     render_frequency = 1
     save_frequency = 10
-    reaching_steps = 500
     total_images_saved = 100000
     max_time_to_target = 10000
 
@@ -65,20 +60,20 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
     res = [render_size[0], render_size[1] * 4]  # vstack feedback from 4 cameras
     subpixels = res[0] * res[1] * 3  # * 3 channels
 
-    dat = DataHandler()
-    dat.save(
-        data={
-            "render_frequency": render_frequency,
-            "save_frequency": save_frequency,
-            "reaching_steps": reaching_steps,
-            "max_time_to_target": max_time_to_target,
-            "render_size": render_size,
-            "dist_limit": dist_limit,
-            "angle_limit": angle_limit,
-        },
-        save_location="%s/params" % test_name,
-        overwrite=True,
-    )
+    if generate_data:
+        dat = DataHandler()
+        dat.save(
+            data={
+                "render_frequency": render_frequency,
+                "save_frequency": save_frequency,
+                "max_time_to_target": max_time_to_target,
+                "render_size": render_size,
+                "dist_limit": dist_limit,
+                "angle_limit": angle_limit,
+            },
+            save_location="%s/params" % test_name,
+            overwrite=True,
+        )
 
     rover = MujocoConfig(folder="", xml_file="rover.xml", use_sim_state=True)
 
@@ -108,7 +103,7 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
     # set up the target position
     net.target = np.array([-0.0, 0.0, 0.2])
 
-    vision = RoverVision(res=res, seed=0)
+    vision = RoverVision(seed=0)
 
     with net:
         net.count = 0
@@ -197,7 +192,9 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
             R = np.dot(R90, R_raw)
 
             # we also want the egocentric velocity of the rover
-            body_com_vel_raw = mujoco_data.cvel[mujoco_model.body_name2id("base_link")][3:]
+            body_com_vel_raw = mujoco_data.cvel[mujoco_model.body_name2id("base_link")][
+                3:
+            ]
             body_com_vel = np.dot(R, body_com_vel_raw)
 
             local_target = np.dot(R, error)
@@ -225,9 +222,9 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
             dist = np.linalg.norm(rover_xyz - net.target)
             if dist < 0.2 or net.time_to_target > max_time_to_target or net.count == 0:
                 # generate a new target at least .5m away from current position
-                while dist < 0.5:
+                while dist < 0.5 or dist > 3.5:
                     phi = np.random.uniform(low=angle_limit[0], high=angle_limit[1])
-                    radius = 1
+                    radius = np.random.uniform(low=dist_limit[0], high=dist_limit[1])
                     net.target = [np.cos(phi) * radius, np.sin(phi) * radius, 0.2]
                     dist = np.linalg.norm(rover_xyz - net.target)
 
@@ -258,7 +255,10 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
 
         # -----------------------------------------------------------------------------
         mujoco_node = nengo.Node(
-            simulate_world_func, size_in=4, size_out=3 + vision.subpixels, label="mujoco"
+            simulate_world_func,
+            size_in=4,
+            size_out=3 + vision.subpixels,
+            label="mujoco",
         )
 
         # --- set up ensemble to calculate acceleration
@@ -334,7 +334,9 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
             nengo.Connection(
                 vision.nengo_output, relay_motor_input_turn[1:], synapse=vision_synapse
             )
-            nengo.Connection(vision.nengo_output, mujoco_node[2:4], synapse=vision_synapse)
+            nengo.Connection(
+                vision.nengo_output, mujoco_node[2:4], synapse=vision_synapse
+            )
         else:
             # connect up turning
             nengo.Connection(
@@ -407,17 +409,42 @@ def demo(backend="cpu", test_name="validation_0000", neural_vision=True):
 
 
 if __name__ == "__main__":
-    ii = 0
-    net = demo(backend, test_name="driving_%04i" % ii, neural_vision=True)
+
+    # set up parameters that depend on cpu or loihi as the backend
+    backend = "loihi"  # can be ["cpu"|"loihi"]
+
+    collect_ground_truth = True  # track ideal network output, useful for plotting
+    generate_data = False  # should training / validation data be created
+    if generate_data:
+        # when generating training data for vision network, run using ideal system
+        motor_neuron_type = nengo.Direct()
+        neural_vision = False
+    else:
+        # otherwise run use spiking neural networks
+        motor_neuron_type = nengo_loihi.neurons.LoihiSpikingRectifiedLinear()
+        neural_vision = True  # if True uses trained vision net, otherwise ground truth
+
+    net = demo(
+        backend,
+        test_name="training_0000",
+        collect_ground_truth=collect_ground_truth,
+        generate_data=generate_data,
+        motor_neuron_type=motor_neuron_type,
+        neural_vision=neural_vision,
+        plot_mounted_camera_freq=None,  # how often to plot image from cameras
+    )
+
     try:
         if backend == "loihi":
             sim = nengo_loihi.Simulator(
                 net,
-                target="loihi",
+                target="sim",  # set equal to "loihi" to run on Loihi hardware
                 hardware_options=dict(snip_max_spikes_per_step=300),
             )
         elif backend == "cpu":
             sim = nengo.Simulator(net, progress_bar=False)
+        else:
+            raise Exception("Invalid backend specified")
 
         with sim:
             start_time = timeit.default_timer()
@@ -431,50 +458,49 @@ if __name__ == "__main__":
         net.interface.disconnect()
         sim.close()
 
-        fig0, axs0 = plt.subplots(2, 1)
+        fig0 = plt.figure()
         target = np.array(net.target_track)
         rover = np.array(net.rover_track)
-        axs0[0].plot(target[:, 0], target[:, 1], "x", mew=3)
-        axs0[0].plot(rover[:, 0], rover[:, 1], lw=2)
-
-        error = np.array(net.turnerror_track)
-        q = np.array(net.q_track)
-        qdes = np.array(net.qdes_track)
-        axs0[1].plot(q, label="q")
-        axs0[1].plot(qdes, "--", label="qdes")
-        axs0[1].plot(error, "r", label="error")
-        axs0[1].legend()
+        plt.plot(target[:, 0], target[:, 1], "x", mew=3)
+        plt.plot(rover[:, 0], rover[:, 1], lw=2)
+        plt.xlim([-5, 5])
+        plt.ylim([-5, 5])
+        plt.xlabel('X (m)')
+        plt.ylabel('Y (m)')
+        plt.gca().set_aspect('equal')
+        plt.title('Rover trajectory in environment')
+        fig0.tight_layout(rect=[0, 0.03, 1, 0.95])
 
         fig1, axs1 = plt.subplots(2, 1)
         u_track = np.array(net.u_track)
-        plt.title("Control signal u")
-        axs1[0].plot(u_track[:, 0], lw=2)
-        axs1[1].plot(u_track[:, 1], lw=2)
+        plt.suptitle("Control network output")
+        axs1[0].plot(u_track[:, 0], lw=2, label='Steering torque')
+        axs1[1].plot(u_track[:, 1], lw=2, label='Wheels torque')
         if collect_ground_truth:
             direct = sim.data[net.dead_end_probe]
-            axs1[0].plot(direct[:, 0], "--", lw=3, alpha=0.5)
-            axs1[1].plot(direct[:, 1], "--", lw=3, alpha=0.5)
+            axs1[0].plot(direct[:, 0], "r--", alpha=0.5, lw=3, label='Ideal steering torque')
+            axs1[1].plot(direct[:, 1], "r--", alpha=0.5, lw=3, label='Ideal wheels torque')
+        axs1[0].legend()
+        axs1[1].legend()
+        axs1[0].set_ylabel('Steering torque')
+        axs1[1].set_ylabel('Wheels torque')
+        axs1[1].set_xlabel('Time (s)')
+        fig1.tight_layout(rect=[0, 0.03, 1, 0.95])
 
-            fig2, axs2 = plt.subplots(3, 1)
-            inputs = np.array(net.input_track)
-            for ii, ax in enumerate(axs2):
-                ax.plot(inputs[:, ii])
-            plt.suptitle("Turn motor inputs")
+        if collect_ground_truth:
+            fig2, axs2 = plt.subplots(2, 1)
             local_target = np.array(net.localtarget_track)
-            axs2[1].plot(local_target[:, 0], "r--", lw=2)
-            axs2[2].plot(local_target[:, 1], "r--", lw=2)
-
-            print(
-                "Steering input means: ",
-                [float("%.3f" % val) for val in np.mean(inputs, axis=0)],
-            )
-            print(
-                "Steering input mins: ",
-                [float("%.3f" % val) for val in np.min(inputs, axis=0)],
-            )
-            print(
-                "Steering input maxs: ",
-                [float("%.3f" % val) for val in np.max(inputs, axis=0)],
-            )
+            plt.suptitle('Vision network output')
+            inputs = np.array(net.input_track)
+            axs2[0].plot(inputs[:, 1], label='Predicted x')
+            axs2[0].plot(local_target[:, 0], "r--", lw=2, label='Ground truth x')
+            axs2[0].legend()
+            axs2[1].plot(inputs[:, 2], label='Predicted y')
+            axs2[1].plot(local_target[:, 1], "r--", lw=2, label='Ground truth y')
+            axs2[1].legend()
+            axs2[0].set_ylabel('X (m)')
+            axs2[1].set_ylabel('Y (m)')
+            axs2[1].set_xlabel('Time (s)')
+            fig2.tight_layout(rect=[0, 0.03, 1, 0.95])
 
         plt.show()
