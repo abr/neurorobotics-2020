@@ -1,26 +1,23 @@
+"""
+To run the demo with Nengo running on cpu:
+    python nengo_rover.py cpu
+
+To run the demo with Nengo on loihi
+    NXSDKHOST=loihighrd python nengo_rover.py
+"""
 import nengo
 import nengo_dl
 import nengo_loihi
 import sys
 
-if sys.version_info > (3, 6):
-    from contextlib import nullcontext
-else:
-    from contextlib import contextmanager
-    @contextmanager
-    def nullcontext(enter_result=None):
-        yield enter_result
-
-import cv2
 import warnings
 import os
-import dl_utils
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
-from abr_analyze import DataHandler
-from nengo.utils.matplotlib import rasterplot
+from abr_analyze import DataHandler, paths
 
+import dl_utils
 from loihi_utils import LoihiRectifiedLinear
 
 
@@ -31,7 +28,6 @@ if gpus:
     try:
         # Currently, memory growth needs to be the same across GPUs
         for gpu in gpus:
-            # tf.config.experimental.set_memory_growth(gpu, True)
             config = tf.compat.v1.ConfigProto()
             config.gpu_options.allow_growth = True
         logical_gpus = tf.config.experimental.list_logical_devices("GPU")
@@ -106,49 +102,31 @@ class RoverVision:
             data_format="channels_last",
         )(self.input)
 
-        self.conv1 = tf.keras.layers.Conv2D(
+        self.conv1_layer = tf.keras.layers.Conv2D(
             filters=16,
             kernel_size=10,
             strides=5,
             use_bias=False,
             activation=tf.nn.relu,
             data_format="channels_last",
-        )(self.conv0)
+        )
+        self.conv1 = self.conv1_layer(self.conv0)
 
         flatten = tf.keras.layers.Flatten()(self.conv1)
         self.dense0_layer = tf.keras.layers.Dense(
-            units=200,
-            use_bias=False,
-            activation=tf.nn.relu
+            units=200, use_bias=False, activation=tf.nn.relu
         )
         self.dense0 = self.dense0_layer(flatten)
         self.dense1_layer = tf.keras.layers.Dense(
-            units=100,
-            use_bias=False,
-            activation=tf.nn.relu
+            units=100, use_bias=False, activation=tf.nn.relu
         )
         self.dense1 = self.dense1_layer(self.dense0)
         self.dense = tf.keras.layers.Dense(units=2, use_bias=False)(self.dense1)
 
         self.model = tf.keras.Model(inputs=self.input, outputs=self.dense)
 
-    def convert(self, gain_scale, activation, synapse=None, training=True):
-        """
-        gain_scale: int
-            scaling factor for spiking network to increase the amount of activity.
-            gain gets scaled by gain_scale and neuron amplitudes get set to 1/gain_scale
-        actiation: nengo.Neuron
-            the neuron type to swap in for the tf.nn.relu in the Keras network
-        synapse: float
-            synapses set on nengo connections
-        """
-
-        converter = nengo_dl.Converter(
-            self.model,
-            swap_activations={tf.nn.relu: activation},
-            scale_firing_rates=gain_scale,
-            synapse=synapse,
-        )
+    def convert(self, converter_params, add_probes=True):
+        converter = nengo_dl.Converter(self.model, **converter_params)
 
         # create references to some nengo objects in the network IO objects
         self.nengo_input = converter.inputs[self.input]
@@ -158,19 +136,21 @@ class RoverVision:
 
         self.nengo_innode = converter.layers[self.input]
         self.nengo_conv0 = converter.layers[self.conv0]
-        nengo_conv1 = converter.layers[self.conv1]
+        self.nengo_conv1 = converter.layers[self.conv1]
         self.nengo_output = converter.layers[self.dense]
 
-        if training:
-            with net:
-                # set our biases to non-trainable to make sure they're always 0
-                net.config[self.nengo_conv0].trainable = False
-                net.config[nengo_conv1].trainable = False
+        with net:
+            # set our biases to non-trainable to make sure they're always 0
+            net.config[self.nengo_conv0].trainable = False
+            net.config[self.nengo_conv1].trainable = False
 
-                # set up probes so that we can add the firing rates to the cost function
+            if add_probes:
+                # set up probes so to add the firing rates to the cost function
                 self.probe_conv0 = nengo.Probe(self.nengo_conv0, label="probe_conv0")
-                self.probe_conv1 = nengo.Probe(nengo_conv1, label="probe_conv1")
-                self.probe_dense = nengo.Probe(self.nengo_output, label="probe_dense", synapse=0.005)
+                self.probe_conv1 = nengo.Probe(self.nengo_conv1, label="probe_conv1")
+                self.probe_dense = nengo.Probe(
+                    self.nengo_output, label="probe_dense", synapse=0.005
+                )
 
         sim = nengo_dl.Simulator(
             net, minibatch_size=self.minibatch_size, seed=self.seed
@@ -178,21 +158,24 @@ class RoverVision:
         return sim, net
 
     def convert_nengodl_to_nengo(self, net, image_array=False, loihi=False):
-        # our input node function
-        def send_image_in(t):
-            # if updating an image over time, like rendering from a simulator
-            # then we update this object each time
-            if image_array:
-                return self.image_input[int(t / 0.001) - 1]
-            return self.image_input
-
-        # if not using nengo dl we have to use a sim.run function
         # create a node so we can inject data into the network
         with net:
             if loihi:
                 nengo_loihi.add_params(net)
                 net.config[self.nengo_conv0.ensemble].on_chip = False
-            # create our input node
+
+                # specify how conv1 layer should be split across Loihi cores
+                conv1_shape = self.conv1_layer.output_shape[1:]
+                net.config[
+                    self.nengo_conv1.ensemble
+                ].block_shape = nengo_loihi.BlockShape((8, 8, 4), conv1_shape)
+
+            # adjust input node to accept input
+            def send_image_in(t):
+                if image_array:
+                    return self.image_input[int(t / 0.001) - 1]
+                return self.image_input
+
             self.nengo_innode.size_out = self.subpixels
             self.nengo_innode.output = send_image_in
 
@@ -203,7 +186,6 @@ class RoverVision:
             sim = nengo.Simulator(net, dt=self.dt)
 
         return sim, net
-        # return None, net
 
     def train(
         self,
@@ -212,8 +194,6 @@ class RoverVision:
         targets,
         epochs,
         save_folder=None,
-        validation_images=None,
-        validation_targets=None,
         num_pts=None,
         fr_loss_function=None,
     ):
@@ -233,10 +213,6 @@ class RoverVision:
             shape (n_training_targets, n_steps, target_dimensions)
         epochs: list of ints
             start and stop epochs
-        validation_images: array of floats (flattened images)
-            shape (n_validation_images, n_steps, subpixels)
-        validation_targets: array of floats (flattened targets)
-            shape (n_validation_targets, n_steps, target_dimensions)
         save_folder: string
             location where to save figures of results
         num_pts: int
@@ -261,29 +237,23 @@ class RoverVision:
                 if epoch > 0:
                     prev_params_loc = "%s/epoch_%i" % (save_folder, epoch - 1)
                     print(
-                        "loading pretrained network parameters from \n%s"
+                        "Loading pretrained network parameters from \n%s"
                         % prev_params_loc
                     )
                     sim.load_params(prev_params_loc)
 
-                print("using learning rate scheduler...")
-
-                # if epoch < 2:
-                #     def scheduler(x):
-                #         return 0.001
-                # else:
                 def scheduler(x):
                     if epoch < 70:
                         return 0.0001
                     elif epoch < 90:
                         return 0.00001
-                    return 0.000001 #* np.exp(0.1 * (0 - epoch//2))
+                    return 0.000001
 
                 print("Learning rate: ", scheduler(None))
 
                 lr_scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
 
-                print("fitting data...")
+                print("Fitting data...")
                 sim.fit(
                     training_images,
                     training_targets,
@@ -292,26 +262,8 @@ class RoverVision:
                 )
 
                 current_params_loc = "%s/epoch_%i" % (save_folder, epoch)
-                print("saving network parameters to %s" % current_params_loc)
+                print("Saving network parameters to %s" % current_params_loc)
                 sim.save_params(current_params_loc)
-
-                if validation_images is not None:
-                    print("Running Prediction in nengo-dl")
-                    data = sim.predict(
-                        validation_images_dict,
-                        n_steps=validation_images.shape[1],
-                        stateful=False,
-                    )
-                    print(data)
-
-                    dl_utils.plot_prediction_error(
-                        predictions=np.asarray(data[vision.nengo_dense]),
-                        target_vals=validation_targets,
-                        save_folder=save_folder,
-                        save_name="validation_error_epoch_%i" % epoch,
-                        num_pts=num_pts,
-                        show_plot=True,
-                    )
 
 
 if __name__ == "__main__":
@@ -338,25 +290,23 @@ if __name__ == "__main__":
             raise KeyError
 
     # check if gain / amplitude scaling is set, default is 1
-    gain_scale = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+    scale_firing_rates = int(sys.argv[3]) if len(sys.argv) > 3 else 1
 
-    use_dl_rate = False
+    # check for specified weights
+    weights = None
     if len(sys.argv) > 4:
-        use_dl_rate = sys.argv[4] == "use_dl_rate"
+        weights = sys.argv[4]
 
     use_new_driver_validation = True
 
     # ------------ set test parameters
     dt = 0.001
-    # db_name = "rover_training_0004"
     db_name = "abr_analyze"
     res = [32, 128]
     n_training = 30000  # number of images to train on
-    n_validation = 1200 # number of validation images
+    n_validation = 1200  # number of validation images
     n_validation_steps = 1
     seed = np.random.randint(1e5)
-    data_dir = "/home/tdewolf/Downloads"
-    driving_data = True  # use data collected while driving around
     normalize_targets = True  # change the target range to -1:1 instead of -pi:pi
 
     # using baseline of 1ms timesteps to define n_steps
@@ -370,13 +320,13 @@ if __name__ == "__main__":
     # plotting parameters
     num_pts = n_validation * n_validation_steps  # number of steps to plot
 
-    # dl_utils.plot_data(db_name=db_name, label='validation_0000', n_imgs=100)
-
-    # ------------ load and prepare our data
+    # ------------ load and prepare data
     # load our raw data
     validation_images, validation_targets = dl_utils.load_data(
-        # db_name=db_name, label="validation_0000", n_imgs=n_validation
-        db_name=db_name, label="driving_0047", n_imgs=10000, step_size=20,
+        db_name=db_name,
+        label="driving_0047",
+        n_imgs=10000,
+        step_size=20,
     )
 
     # our saved targets are 3D but we only care about x and y
@@ -412,9 +362,14 @@ if __name__ == "__main__":
     # ------------ set up data tracking
     save_db_name = "%s_results" % db_name  # for saving results to
     group_name = activation_name  # helps to define what this group of tests is doing
-    test_name = str(gain_scale)
+    test_name = str(scale_firing_rates)
     # for saving figures and weights
-    save_folder = "%s/data/%s/%s/%s" % (data_dir, db_name, group_name, test_name,)
+    save_folder = "%s/data/%s/%s/%s" % (
+        paths.database_dir,
+        db_name,
+        group_name,
+        test_name,
+    )
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
 
@@ -422,93 +377,68 @@ if __name__ == "__main__":
     vision = RoverVision(res=res, minibatch_size=minibatch_size, dt=dt, seed=seed,)
 
     if mode == "train":
-
-        n_training_steps = 1
         epochs = [0, 1000]
 
         # prepare training data ------------------------------------
-        if driving_data:
-            try:
-                processed_data = np.load("%s/%s_driving_training_images_processed.npz" % (data_dir, db_name))
-                training_images = processed_data["images"]
-                training_targets = processed_data["targets"]
-                if normalize_targets:
-                    training_targets /= np.pi
-                print("Processed training images loaded from file...")
+        try:
+            # try to load in saved processed data
+            processed_data = np.load(
+                "%s/%s_driving_training_images_processed.npz"
+                % (paths.database_dir, db_name)
+            )
+            training_images = processed_data["images"]
+            training_targets = processed_data["targets"]
+            if normalize_targets:
+                training_targets /= np.pi
+            print("Processed training images loaded from file...")
 
-            except FileNotFoundError:
-                print("Processed training images not found, processing now...")
-                training_images, training_targets = dl_utils.consolidate_data(
-                    db_name=db_name,
-                    label_list=['driving_%04i' % ii for ii in range(45)],
-                    step_size=5,
-                )
-                # our saved targets are 3D but we only care about x and y
-                training_targets = training_targets[:, 0:2]
+        except FileNotFoundError:
+            print("Processed training images not found, processing now...")
+            training_images, training_targets = dl_utils.consolidate_data(
+                db_name=db_name,
+                label_list=["driving_%04i" % ii for ii in range(45)],
+                step_size=5,
+            )
+            # our saved targets are 3D but we only care about x and y
+            training_targets = training_targets[:, 0:2]
 
-                # do our resizing, scaling, and flattening
-                training_images = dl_utils.preprocess_images(
-                    image_data=training_images,
-                    show_resized_image=False,
-                    flatten=True,
-                    normalize=False,
-                    res=res,
-                )
-                np.savez_compressed(
-                    "%s/%s_driving_training_images_processed" % (data_dir, db_name),
-                    images=training_images,
-                    targets=training_targets,
-                )
-        else:
-            try:
-                processed_data = np.load("%s/%s_training_images_processed.npz" % (data_dir, db_name))
-                training_images = processed_data["images"]
-                training_targets = processed_data["targets"]
-                if normalize_targets:
-                    training_targets /= np.pi
-                print("Processed training images loaded from file...")
+            # do our resizing, scaling, and flattening
+            training_images = dl_utils.preprocess_images(
+                image_data=training_images,
+                show_resized_image=False,
+                flatten=True,
+                normalize=False,
+                res=res,
+            )
+            # save processed training data to speed up future runs
+            np.savez_compressed(
+                "%s/%s_driving_training_images_processed"
+                % (paths.database_dir, db_name),
+                images=training_images,
+                targets=training_targets,
+            )
 
-            except FileNotFoundError:
-                print("Processed training images not found, generating...")
-                # load raw data
-                training_images, training_targets = dl_utils.load_data(
-                    db_name=db_name, label="training_0000", n_imgs=n_training
-                )
-                # our saved targets are 3D but we only care about x and y
-                training_targets = training_targets[:, 0:2]
-
-                # do our resizing, scaling, and flattening
-                training_images = dl_utils.preprocess_images(
-                    image_data=training_images,
-                    show_resized_image=False,
-                    flatten=True,
-                    normalize=False,
-                    res=res,
-                )
-                np.savez_compressed(
-                    "%s/%s_training_images_processed" % (data_dir, db_name),
-                    images=training_images,
-                    targets=training_targets,
-                )
-
-        # repeat and batch our data
+        # repeat and batch training data
         training_images = dl_utils.repeat_data(
-            data=training_images, batch_data=True, n_steps=n_training_steps
+            data=training_images, batch_data=True, n_steps=1
         )
         training_targets = dl_utils.repeat_data(
-            data=training_targets, batch_data=True, n_steps=n_training_steps
+            data=training_targets, batch_data=True, n_steps=1
         )
 
+        # convert from Keras to Nengo
         sim, net = vision.convert(
-            gain_scale=gain_scale, activation=activation, synapse=None
+            converter_params={
+                "swap_activations": {tf.nn.relu: activation},
+                "scale_firing_rates": scale_firing_rates,
+            }
         )
+        # train up our network
         vision.train(
             sim=sim,
             images=training_images,
             targets=training_targets,
             epochs=epochs,
-            # validation_images=validation_images,
-            validation_images=None,
             save_folder=save_folder,
             num_pts=num_pts,
             validation_targets=validation_targets,
@@ -527,7 +457,7 @@ if __name__ == "__main__":
 
         test_params = {
             "dt": dt,
-            "gain_scale": gain_scale,
+            "scale_firing_rates": scale_firing_rates,
             "n_training": n_training,
             "n_validation": n_validation,
             "res": res,
@@ -544,55 +474,50 @@ if __name__ == "__main__":
         )
 
     else:
+        sim, net = vision.convert(
+            converter_params={
+                "swap_activations": {tf.nn.relu: activation},
+                "scale_firing_rates": scale_firing_rates,
+            }
+        )
 
-        synapse = None  # 0.001
-        # weights =  "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_306"
-        # weights =  "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_88"
-        # weights =  "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_116"
-        weights =  "/home/tdewolf/Downloads/data/abr_analyze/loihirelu/400/epoch_999"
+        # load a specific set of weights
+        if weights is not None:
+            print("Received specific weights to use: ", weights)
+            sim.load_params(weights)
 
-        with tf.keras.backend.learning_phase_scope(1) if use_dl_rate else nullcontext():
-            sim, net = vision.convert(
-                gain_scale=gain_scale, activation=activation, synapse=synapse,
+        if mode == "predict":
+            # this mode uses the NengoDL simulator, and input images are presented
+            # as batched input. for simulating spiking neurons, use 'run' mode
+            data = sim.predict(
+                {vision.nengo_input: validation_images},
+                n_steps=validation_images.shape[1],
+                stateful=False,
             )
 
-            # load a specific set of weights
-            if weights is not None:
-                print("Received specific weights to use: ", weights)
-                sim.load_params(weights)
-
-            # if batched prediction
-            if mode == "predict":
-                data = sim.predict(
-                    {vision.nengo_input: validation_images},
-                    n_steps=validation_images.shape[1],
-                    stateful=False,
-                )
-
-            elif mode == "run":
-                with sim:
-                    sim.freeze_params(net)
-                # if we want to run this in Nengo and not Nengo DL
-                # have to extend our network to manually inject input images
-                sim, net = vision.convert_nengodl_to_nengo(net, image_array=True, loihi=True)
-                print('simulator: ', sim)
-
-                # the user needs to pass input image to rover_vision.image_input
-                # should be [n_timesteps, image.flatten()]
-                vision.image_input = validation_images[0]
-
-                sim_steps = dt * n_validation_steps * n_validation
-                sim.run(sim_steps)
-                data = sim.data
-
-            print("data shape: ", data[vision.nengo_dense].shape)
-            print("validation targets size: ", validation_targets.shape)
-            dl_utils.plot_prediction_error(
-                # predictions=np.asarray(data[vision.nengo_dense]),
-                predictions=np.asarray(data[vision.probe_dense]),
-                target_vals=validation_targets,
-                save_folder=save_folder,
-                save_name="%s_prediction_error" % mode,
-                num_pts=num_pts,
-                show_plot=True,
+        elif mode == "run":
+            # this mode uses the Nengo or NengoLoihi simulators, and input images are
+            # presented sequentially to the network, appropriate for spiking neurons
+            with sim:
+                sim.freeze_params(net)
+            # extend the network to manually inject input images
+            sim, net = vision.convert_nengodl_to_nengo(
+                net, image_array=True, loihi=True
             )
+
+            # dimensions should be (n_timesteps, image.flatten())
+            vision.image_input = validation_images[0]
+
+            sim_steps = dt * n_validation_steps * n_validation
+            with sim:
+                sim.run(0.999)
+            data = sim.data
+
+        dl_utils.plot_prediction_error(
+            predictions=np.asarray(data[vision.probe_dense]),
+            target_vals=validation_targets,
+            save_folder=save_folder,
+            save_name="%s_prediction_error" % mode,
+            num_pts=num_pts,
+            show_plot=True,
+        )
