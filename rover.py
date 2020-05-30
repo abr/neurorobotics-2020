@@ -1,5 +1,5 @@
 """
-To generate training data to train up the RoverVision system, set generate_data=True
+To generate training data to train up the RoverVision system, set generate_data=True.
 
 
 To run the demo with Nengo running on cpu:
@@ -11,20 +11,17 @@ To run the demo with Nengo on loihi
 import glfw
 import matplotlib.pyplot as plt
 import numpy as np
-import sys
 import timeit
 import tensorflow as tf
 
-import mujoco_py
 import nengo
-import nengo_dl
 import nengo_loihi
 
 from abr_control.arms.mujoco_config import MujocoConfig
 from abr_control.interfaces.mujoco import Mujoco
 from abr_analyze import DataHandler
 
-from rover_vision import RoverVision, LoihiRectifiedLinear
+from rover_vision import RoverVision
 
 
 class ExitSim(Exception):
@@ -44,7 +41,7 @@ def demo(
     if backend == "loihi":
         nengo_loihi.set_defaults()
 
-    seed = 9
+    seed = 1
     np.random.seed(seed)
     # target generation limits
     dist_limit = [0.25, 3.5]
@@ -77,7 +74,7 @@ def demo(
 
     rover = MujocoConfig(folder="", xml_file="rover.xml", use_sim_state=True)
 
-    net = nengo.Network()
+    net = nengo.Network(seed=seed)
     # create our Mujoco interface
     net.interface = Mujoco(rover, dt=0.001, create_offscreen_rendercontext=True)
     net.interface.connect()
@@ -105,6 +102,7 @@ def demo(
 
     vision = RoverVision(seed=0)
 
+    net.config[nengo.Connection].synapse = None
     with net:
         net.count = 0
         net.image_count = 0
@@ -136,15 +134,14 @@ def demo(
             with visionsim:
                 visionsim.freeze_params(visionnet_1)
 
-                vision.nengo_innode.size_in = vision.subpixels
-                vision.nengo_innode.output = None
+                vision.input.size_in = vision.subpixels
+                vision.input.output = None
 
+        accel_scale = 500
+        steer_scale = 500
         def simulate_world_func(t, x):
-            # NOTE: radius of nengo_loihi decode_neurons is 1
-            # so output from steering_wheel is in that range, scale back up here
-            # turn = x[0] * 2 * np.pi * 5000  # also scale by kp = 5000
-            turn = x[0] * 2 * 5000  # also scale by kp = 5000
-            wheels = x[1] * 20 * 30
+            turn = x[0] * steer_scale
+            wheels = x[1] * accel_scale
             u = np.array([turn, wheels])
             net.u_track.append(u)
             prediction = x[2:4]
@@ -222,7 +219,7 @@ def demo(
             dist = np.linalg.norm(rover_xyz - net.target)
             if dist < 0.2 or net.time_to_target > max_time_to_target or net.count == 0:
                 # generate a new target at least .5m away from current position
-                while dist < 0.5 or dist > 3.5:
+                while dist < 1 or dist > 2.5:
                     phi = np.random.uniform(low=angle_limit[0], high=angle_limit[1])
                     radius = np.random.uniform(low=dist_limit[0], high=dist_limit[1])
                     net.target = [np.cos(phi) * radius, np.sin(phi) * radius, 0.2]
@@ -231,6 +228,7 @@ def demo(
                 interface.set_mocap_xyz("target", net.target)
                 net.target_count += 1
                 net.time_to_target = 0
+                net.target_track.append(net.target)
 
             # send to mujoco, stepping the sim forward --------------------------------
             interface.send_forces(u)
@@ -241,13 +239,12 @@ def demo(
             )
 
             # scale down for sending into motor_control ensemble
-            output_signal[:3] = output_signal[:3] / 0.5
+            output_signal[:3] = output_signal[:3] / 0.7
 
             net.count += 1
             net.time_to_target += 1
 
             # track data
-            net.target_track.append(net.target)
             net.rover_track.append(np.copy(rover_xyz))
             net.localtarget_track.append(np.copy(local_target / np.pi))
 
@@ -266,19 +263,20 @@ def demo(
 
         def accel_function(x):
             error = x * np.pi / -max_dist  # scale back up error signal from vision
-            return min(np.linalg.norm(error), 1) * np.sign(error[1]) * -1
+            return min(np.linalg.norm(error), 1) #* -1 # * np.sign(error[1])
 
         motor_control_accel = nengo.Ensemble(
             neuron_type=motor_neuron_type,
             n_neurons=4096,
             dimensions=2,
-            max_rates=nengo.dists.Uniform(175, 220),
-            radius=np.sqrt(2),
+            max_rates=nengo.dists.Uniform(50, 200),
+            radius=1,#np.sqrt(2),
             label="motor_control_accel",
         )
 
         nengo.Connection(
             motor_control_accel, mujoco_node[1], function=lambda x: accel_function(x),
+            synapse=0.1
         )
 
         # --- set up ensemble to calculate torque to apply to steering wheel
@@ -287,11 +285,12 @@ def demo(
                 net.input_track.append(x)
 
             error = x[1:] * np.pi  # take out the error signal from vision
-            q = x[0] * 0.5  # scale normalized input back to original range
+            q = x[0] * 0.7  # scale normalized input back to original range
 
             # arctan2 input set this way to account for different alignment
             # of (x, y) axes of rover and the environment
-            turn_des = np.arctan2(-error[0], abs(error[1]))
+            # turn_des = np.arctan2(-error[0], abs(error[1]))
+            turn_des = np.arctan2(-error[0], error[1])
             u = (turn_des - q) / 2  # divide by 2 to get in -1 to 1 ish range
 
             # record input for finding mean and variance values
@@ -302,40 +301,41 @@ def demo(
 
             return u
 
-        motor_control_turn = nengo.Ensemble(
+        motor_control_steer = nengo.Ensemble(
             neuron_type=motor_neuron_type,
             n_neurons=4096,
             dimensions=3,
-            max_rates=nengo.dists.Uniform(175, 220),
-            radius=np.sqrt(3),
-            label="motor_control_turn",
+            max_rates=nengo.dists.Uniform(50, 200),
+            radius=np.sqrt(2),
+            label="motor_control_steer",
         )
 
         nengo.Connection(
-            motor_control_turn, mujoco_node[0], function=lambda x: steer_function(x),
+            motor_control_steer, mujoco_node[0], function=lambda x: steer_function(x),
+            synapse=0.025
         )
 
         relay_motor_input_turn = nengo.Node(size_in=3, label="relay_motor_input")
-        nengo.Connection(relay_motor_input_turn, motor_control_turn, synapse=None)
+        nengo.Connection(relay_motor_input_turn, motor_control_steer, synapse=None)
 
         # -- send motor feedback to motor control
         nengo.Connection(mujoco_node[0], relay_motor_input_turn[0], synapse=None)
 
         # --- connect up vision to motor ensembles and mujoco node
-        vision_synapse = 0.01
+        vision_synapse = 0.05
         if neural_vision:
             nengo.Connection(
-                vision.nengo_output, motor_control_accel, synapse=vision_synapse
+                vision.output, motor_control_accel, synapse=vision_synapse
             )
 
             # send image input in to vision system
-            nengo.Connection(mujoco_node[3:], vision.nengo_innode, synapse=None)
+            nengo.Connection(mujoco_node[3:], vision.input, synapse=None)
 
             nengo.Connection(
-                vision.nengo_output, relay_motor_input_turn[1:], synapse=vision_synapse
+                vision.output, relay_motor_input_turn[1:], synapse=vision_synapse
             )
             nengo.Connection(
-                vision.nengo_output, mujoco_node[2:4], synapse=vision_synapse
+                vision.output, mujoco_node[2:4], synapse=vision_synapse
             )
         else:
             # connect up turning
@@ -368,7 +368,7 @@ def demo(
                 motor_control_direct,
                 dead_end[1],
                 function=lambda x: accel_function(x[1:]),
-                transform=[[20 * 30]],
+                transform=[[accel_scale]],
                 synapse=0,
             )
 
@@ -376,14 +376,14 @@ def demo(
                 motor_control_direct,
                 dead_end[0],
                 function=lambda x: steer_function(x, track=True),
-                transform=[[2 * 5000]],
+                transform=[[steer_scale]],
                 synapse=0,
             )
 
             # send vision prediction to motor control
             if neural_vision:
                 nengo.Connection(
-                    vision.nengo_output,
+                    vision.output,
                     motor_control_direct[1:],
                     synapse=vision_synapse,
                 )
@@ -403,7 +403,7 @@ def demo(
             nengo_loihi.add_params(net)
 
             if neural_vision:
-                net.config[vision.nengo_conv0.ensemble].on_chip = False
+                net.config[vision.conv0.ensemble].on_chip = False
 
     return net
 
@@ -463,15 +463,14 @@ if __name__ == "__main__":
         rover = np.array(net.rover_track)
         plt.plot(target[:, 0], target[:, 1], "x", mew=3)
         plt.plot(rover[:, 0], rover[:, 1], lw=2)
-        plt.xlim([-5, 5])
-        plt.ylim([-5, 5])
         plt.xlabel('X (m)')
         plt.ylabel('Y (m)')
         plt.gca().set_aspect('equal')
         plt.title('Rover trajectory in environment')
         fig0.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.savefig('Figures/rover_trajectory.pdf')
 
-        fig1, axs1 = plt.subplots(2, 1)
+        fig1, axs1 = plt.subplots(2, 1, figsize=(8, 4))
         u_track = np.array(net.u_track)
         plt.suptitle("Control network output")
         axs1[0].plot(u_track[:, 0], lw=2, label='Steering torque')
@@ -481,26 +480,32 @@ if __name__ == "__main__":
             axs1[0].plot(direct[:, 0], "r--", alpha=0.5, lw=3, label='Ideal steering torque')
             axs1[1].plot(direct[:, 1], "r--", alpha=0.5, lw=3, label='Ideal wheels torque')
         axs1[0].legend()
+        axs1[0].grid()
         axs1[1].legend()
+        axs1[1].grid()
         axs1[0].set_ylabel('Steering torque')
         axs1[1].set_ylabel('Wheels torque')
         axs1[1].set_xlabel('Time (s)')
         fig1.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.savefig('Figures/control_network_output.pdf')
 
         if collect_ground_truth:
-            fig2, axs2 = plt.subplots(2, 1)
+            fig2, axs2 = plt.subplots(2, 1, figsize=(8, 4))
             local_target = np.array(net.localtarget_track)
             plt.suptitle('Vision network output')
             inputs = np.array(net.input_track)
             axs2[0].plot(inputs[:, 1], label='Predicted x')
             axs2[0].plot(local_target[:, 0], "r--", lw=2, label='Ground truth x')
             axs2[0].legend()
+            axs2[0].grid()
             axs2[1].plot(inputs[:, 2], label='Predicted y')
             axs2[1].plot(local_target[:, 1], "r--", lw=2, label='Ground truth y')
             axs2[1].legend()
+            axs2[1].grid()
             axs2[0].set_ylabel('X (m)')
             axs2[1].set_ylabel('Y (m)')
             axs2[1].set_xlabel('Time (s)')
             fig2.tight_layout(rect=[0, 0.03, 1, 0.95])
 
+            plt.savefig('Figures/vision_network_output.pdf')
         plt.show()

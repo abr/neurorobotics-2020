@@ -103,58 +103,27 @@ class RoverVision:
 
         net = converter.net
 
-        self.nengo_innode = converter.layers[self.input]
-        self.nengo_conv0 = converter.layers[self.conv0]
-        self.nengo_conv1 = converter.layers[self.conv1]
-        self.nengo_output = converter.layers[self.dense]
+        self.input = converter.layers[self.input]
+        self.conv0 = converter.layers[self.conv0]
+        self.conv1 = converter.layers[self.conv1]
+        self.output = converter.layers[self.dense]
 
         with net:
             # set our biases to non-trainable to make sure they're always 0
-            net.config[self.nengo_conv0].trainable = False
-            net.config[self.nengo_conv1].trainable = False
+            net.config[self.conv0].trainable = False
+            net.config[self.conv1].trainable = False
 
             if add_probes:
                 # set up probes so to add the firing rates to the cost function
-                self.probe_conv0 = nengo.Probe(self.nengo_conv0, label="probe_conv0")
-                self.probe_conv1 = nengo.Probe(self.nengo_conv1, label="probe_conv1")
+                self.probe_conv0 = nengo.Probe(self.conv0, label="probe_conv0")
+                self.probe_conv1 = nengo.Probe(self.conv1, label="probe_conv1")
                 self.probe_dense = nengo.Probe(
-                    self.nengo_output, label="probe_dense", synapse=0.005
+                    self.output, label="probe_dense", synapse=0.005
                 )
 
         sim = nengo_dl.Simulator(
             net, minibatch_size=self.minibatch_size, seed=self.seed
         )
-        return sim, net
-
-    def convert_nengodl_to_nengo(self, net, image_array=False, loihi=False):
-        """
-        """
-        with net:
-            if loihi:
-                nengo_loihi.add_params(net)
-                net.config[self.nengo_conv0.ensemble].on_chip = False
-
-                # specify how conv1 layer should be split across Loihi cores
-                conv1_shape = self.conv1_layer.output_shape[1:]
-                net.config[
-                    self.nengo_conv1.ensemble
-                ].block_shape = nengo_loihi.BlockShape((8, 8, 4), conv1_shape)
-
-            # adjust input node to accept input
-            def send_image_in(t):
-                if image_array:
-                    return self.image_input[int(t / 0.001) - 1]
-                return self.image_input
-
-            self.nengo_innode.size_out = self.subpixels
-            self.nengo_innode.output = send_image_in
-
-        # replace nengo_dl simulator with the nengo or nengo_loihi simulator
-        if loihi:
-            sim = nengo_loihi.Simulator(net, dt=self.dt)
-        else:
-            sim = nengo.Simulator(net, dt=self.dt)
-
         return sim, net
 
 
@@ -163,7 +132,10 @@ if __name__ == "__main__":
     """
 
     mode = "predict"  # should be ["predict"|"run"]
-    activation = LoihiRectifiedLinear()  # any Nengo neuron type
+    if mode == "run":
+        activation = LoihiSpikingRectifiedLinear()  # can be any Nengo neuron type
+    elif mode == "predict":
+        activation = LoihiRectifiedLinear()
     scale_firing_rates = 400
     weights = "epoch_41"
 
@@ -189,7 +161,8 @@ if __name__ == "__main__":
     targets = dl_utils.repeat_data(targets, batch_data=False, n_steps=1)
 
     # instantiate our keras converted network
-    vision = RoverVision(minibatch_size=1, dt=0.001, seed=np.random.randint(1e5))
+    dt = 0.001
+    vision = RoverVision(minibatch_size=1, dt=dt, seed=np.random.randint(1e5))
     # convert from Keras to Nengo
     sim, net = vision.convert(
         converter_params={
@@ -205,20 +178,28 @@ if __name__ == "__main__":
         # this mode uses the NengoDL simulator, and input images are presented
         # as batched input. for simulating spiking neurons, use 'run' mode
         data = sim.predict(
-            {vision.nengo_input: images}, n_steps=images.shape[1], stateful=False,
+            {vision.input: images}, n_steps=images.shape[1], stateful=False,
         )
 
     elif mode == "run":
         # this mode uses the Nengo or NengoLoihi simulators, and input images are
         # presented sequentially to the network, appropriate for spiking neurons
+        images = images.squeeze()
+        def send_image_in(t):
+            return vision.image_input[int(t / 0.001) - 1]
+
         with sim:
             sim.freeze_params(net)
-        # extend the network to manually inject input images
-        sim, net = vision.convert_nengodl_to_nengo(net, image_array=True, loihi=True)
+            vision.input.output = send_image_in
+
+        with net:
+            nengo_loihi.add_params(net)
+            net.config[vision.conv0.ensemble].on_chip = False
 
         # dimensions should be (n_timesteps, image.flatten())
         vision.image_input = images[0]
 
+        sim = nengo_loihi.Simulator(net, dt=dt)
         with sim:
             sim.run(dt * images.shape[0])
         data = sim.data
