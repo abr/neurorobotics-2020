@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from abr_analyze import DataHandler
+from data_handler import DataHandler
 import matplotlib.pyplot as plt
 from nengo.utils.matplotlib import rasterplot
 
@@ -124,7 +124,7 @@ def repeat_data(data, batch_data=False, n_steps=1):
     return data
 
 
-def load_data(db_name, label="training_0000", n_imgs=None, thresh=1e5, step_size=1):
+def load_data(db_name, label="training_0000", n_imgs=None, thresh=1e5, step_size=1, db_dir=None):
     """
     loads rgb images and targets from an hdf5 database and returns them as a np array
 
@@ -148,19 +148,20 @@ def load_data(db_name, label="training_0000", n_imgs=None, thresh=1e5, step_size
         how many images to load
     """
     # TODO: specify the data format expected in the comment above
-    dat = DataHandler(db_name)
+    dat = DataHandler(db_dir=db_dir, db_name=db_name)
 
     # load training images
     images = []
     targets = []
 
-    keys = np.array([int(val) for val in dat.get_keys("%s/data" % label)])
+    skip_list = ['datestamp', 'timestamp']
+    keys = np.array([int(val) for val in dat.get_keys("%s" % label) if val not in skip_list])
     n_imgs = max(keys) if n_imgs is None else n_imgs
     print("Total number of images in dataset: ", max(keys))
 
     for nn in range(0, n_imgs, step_size):
         data = dat.load(
-            parameters=["rgb", "target"], save_location="%s/data/%04d" % (label, nn)
+            parameters=["rgb", "target"], save_location="%s/%04d" % (label, nn)
         )
         if np.linalg.norm(data["target"]) < thresh:
             images.append(data["rgb"])
@@ -174,7 +175,7 @@ def load_data(db_name, label="training_0000", n_imgs=None, thresh=1e5, step_size
     return images, targets
 
 
-def plot_data(db_name, label="training_0000", n_imgs=None):
+def plot_data(db_name, label="training_0000", n_imgs=None, db_dir=None):
     """
     loads rgb images and targets from an hdf5 database and plots the images, prints
     the targets
@@ -199,7 +200,7 @@ def plot_data(db_name, label="training_0000", n_imgs=None):
         how many images to load
     """
     # TODO: specify the data format expected in the comment above
-    dat = DataHandler(db_name)
+    dat = DataHandler(db_name=db_name, db_dir=db_dir)
 
     keys = np.array([int(val) for val in dat.get_keys("%s/data" % label)])
     print("Total number of images in dataset: ", max(keys))
@@ -291,7 +292,7 @@ def plot_prediction_error(
     plt.close()
 
 
-def consolidate_data(db_name, label_list, thresh=3.5, step_size=1):
+def consolidate_data(db_name, label_list, thresh=3.5, step_size=1, db_dir=None):
     """
     loads rgb images and targets from multiple hdf5 database and consolidates them
     into a single np array, saves back to the database under the specified label
@@ -303,7 +304,7 @@ def consolidate_data(db_name, label_list, thresh=3.5, step_size=1):
     label_list: list
         list of locations in database to load from
     """
-    dat = DataHandler(db_name)
+    dat = DataHandler(db_dir=db_dir, db_name=db_name)
 
     all_images = []
     all_targets = []
@@ -312,10 +313,11 @@ def consolidate_data(db_name, label_list, thresh=3.5, step_size=1):
         print("db_name: ", db_name)
         print("label: ", label)
         images, targets = load_data(
-            db_name,
+            db_name=db_name,
+            db_dir=db_dir,
             label=label,
             thresh=thresh,
-            step_size=1 if ii in [30, 31] else step_size,
+            step_size=step_size,
         )
         all_images.append(images)
         all_targets.append(targets)

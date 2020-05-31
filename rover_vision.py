@@ -1,12 +1,13 @@
 """
 To run the demo with Nengo running on cpu:
-    python nengo_rover.py cpu
+    python nengo_rover.py
 
 To run the demo with Nengo on loihi
-    NXSDKHOST=loihighrd python nengo_rover.py
+    NXSDKHOST=loihighrd python rover_vision.py
 """
 import tensorflow as tf
 import numpy as np
+import os
 import sys
 
 import nengo
@@ -52,13 +53,15 @@ class RoverVision:
 
         self.dt = dt
         self.seed = seed
-        self.res = [32, 128]  # size of input image in pixels
-        self.subpixels = self.res[0] * self.res[1] * 3
+        self.resolution = np.array([32, 32])
+        # input size is larger than resolution because we receive input from 4 cameras
+        self.input_size = np.array([self.resolution[0], self.resolution[1] * 4])
+        self.subpixels = self.input_size[0] * self.input_size[1] * 3
         self.minibatch_size = minibatch_size
         self.image_input = np.zeros(self.subpixels)
 
         # Define our keras network
-        self.input = tf.keras.Input(shape=(self.res[0], self.res[1], 3))
+        self.input = tf.keras.Input(shape=(self.input_size[0], self.input_size[1], 3))
 
         self.conv0 = tf.keras.layers.Conv2D(
             filters=3,
@@ -92,10 +95,13 @@ class RoverVision:
 
         self.model = tf.keras.Model(inputs=self.input, outputs=self.dense)
 
-    def convert(self, converter_params, add_probes=True):
+    def convert(self, add_probes=True, **kwargs):
+        """ Run the NengoDL Converter on the above Keras net
+
+        add_probes : bool, optional (Default: True)
+            if False, no probes are added to the model, reduces simulation overhead
         """
-        """
-        converter = nengo_dl.Converter(self.model, **converter_params)
+        converter = nengo_dl.Converter(self.model, **kwargs)
 
         # create references to some nengo objects in the network IO objects
         self.nengo_input = converter.inputs[self.input]
@@ -128,19 +134,20 @@ class RoverVision:
 
 
 if __name__ == "__main__":
-    """
-    """
-
+    current_dir = os.path.abspath('.')
+    save_folder = '%s/data' % current_dir
+    db_dir = None
     mode = "predict"  # should be ["predict"|"run"]
     if mode == "run":
         activation = LoihiSpikingRectifiedLinear()  # can be any Nengo neuron type
     elif mode == "predict":
         activation = LoihiRectifiedLinear()
+
     scale_firing_rates = 400
-    weights = "epoch_41"
+    weights = "%s/weights" % save_folder
 
     images, targets = dl_utils.load_data(
-        db_name="abr_analyze", label="driving_0047", n_imgs=10000, step_size=20,
+        db_dir=db_dir, db_name="rover", label="validation", step_size=20,
     )
 
     # saved targets are 3D but we only care about x and y
@@ -165,10 +172,8 @@ if __name__ == "__main__":
     vision = RoverVision(minibatch_size=1, dt=dt, seed=np.random.randint(1e5))
     # convert from Keras to Nengo
     sim, net = vision.convert(
-        converter_params={
-            "swap_activations": {tf.nn.relu: activation},
-            "scale_firing_rates": scale_firing_rates,
-        }
+        swap_activations={tf.nn.relu: activation},
+        scale_firing_rates=scale_firing_rates,
     )
     if weights is not None:
         sim.load_params(weights)
@@ -185,6 +190,7 @@ if __name__ == "__main__":
         # this mode uses the Nengo or NengoLoihi simulators, and input images are
         # presented sequentially to the network, appropriate for spiking neurons
         images = images.squeeze()
+
         def send_image_in(t):
             return vision.image_input[int(t / 0.001) - 1]
 

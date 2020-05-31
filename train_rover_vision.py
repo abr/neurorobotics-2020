@@ -10,13 +10,23 @@ import nengo_loihi
 
 import warnings
 import os
+import sys
 import tensorflow as tf
 import numpy as np
-from abr_analyze import DataHandler, paths
+from data_handler import DataHandler
 
 import dl_utils
 from rover_vision import RoverVision, LoihiRectifiedLinear
 
+reprocess_data = False
+if len(sys.argv) > 1:
+    if sys.argv[1] == 'reprocess_data':
+        reprocess_data = True
+
+current_dir = os.path.abspath('.')
+save_folder = '%s/data' % current_dir
+if not os.path.exists(save_folder):
+    os.makedirs(save_folder)
 
 # =================== Tensorflow settings to avoid OOM errors =================
 warnings.simplefilter("ignore")
@@ -34,48 +44,45 @@ if gpus:
         print(e)
 # =============================================================================
 
-
+save_all_weights = False
 activation = nengo_loihi.neurons.LoihiSpikingRectifiedLinear()
 dt = 0.001
-db_name = "abr_analyze"  # database we're reading images and targets from
-epochs = [0, 1000]  # how many training iterations to run
+database_dir = None
+db_name = "rover"  # database we're reading images and targets from
+epochs = [0, 50]  # how many training iterations to run
 minibatch_size = 10
 scale_firing_rates = 400  # gain on first layer connection weights
 seed = np.random.randint(1e5)
-
-# for saving figures and weights
-save_folder = "%s/data/%s/%s/%s" % (
-    paths.database_dir,
-    db_name,
-    activation,
-    str(scale_firing_rates),
-)
-if not os.path.exists(save_folder):
-    os.makedirs(save_folder)
 
 # instantiate our keras converted network
 vision = RoverVision(minibatch_size=minibatch_size, dt=dt, seed=seed)
 
 try:
-    # try to load in saved processed data
-    processed_data = np.load(
-        "%s/%s_training_images_processed.npz" % (paths.database_dir, db_name)
-    )
-    images = processed_data["images"]
-    targets = processed_data["targets"]
-    print("Processed training images loaded from file...")
+    if not reprocess_data:
+        reprocess_message = "\nProcessed training images not found, processing now...\n"
+        # try to load in saved processed data
+        processed_data = np.load(
+            "%s/%s_training_images_processed.npz" % (save_folder, db_name)
+        )
+        images = processed_data["images"]
+        targets = processed_data["targets"]
+        print("\nProcessed training images loaded from file...\n")
+    else:
+        reprocess_message = "\nReprocessing training images...\n"
+        raise FileNotFoundError
 
-except FileNotFoundError:
-    print("Processed training images not found, processing now...")
+except (FileNotFoundError, KeyError):
+    print(reprocess_message)
     images, targets = dl_utils.consolidate_data(
         db_name=db_name,
+        db_dir=database_dir,
         # assuming data collected is all saved as training_0000. if you run multiple
         # sessions and save under more test names, e.g. training_0001, training_0002,
         # then update this parameter to include those test names.
-        label_list=["training_%04i" % ii for ii in range(1)],
+        label_list=['training'],
         # how often to sample the images saved, works in conjunction with the
         # save_frequency parameter in rover.py used when saving data
-        step_size=5,
+        step_size=1,
     )
     targets = targets[:, 0:2]  # saved targets are 3D but only care about x and y
 
@@ -89,7 +96,7 @@ except FileNotFoundError:
     )
     # save processed training data to speed up future runs
     np.savez_compressed(
-        "%s/%s_training_images_processed" % (paths.database_dir, db_name),
+        "%s/%s_training_images_processed" % (save_folder, db_name),
         images=images,
         targets=targets,
     )
@@ -101,12 +108,11 @@ targets /= np.pi  # change target range to -1:1 instead of -pi:pi
 targets = dl_utils.repeat_data(targets, batch_data=True, n_steps=1)
 
 # convert from Keras to Nengo
-sim, net = vision.convert(
-    converter_params={
-        "swap_activations": {tf.nn.relu: activation},
-        "scale_firing_rates": scale_firing_rates,
-    }
-)
+kwargs={
+    "swap_activations": {tf.nn.relu: activation},
+    "scale_firing_rates": scale_firing_rates,
+}
+sim, net = vision.convert(**kwargs)
 
 loss = {vision.nengo_dense: tf.losses.mse}  # set up cost function
 targets = {vision.nengo_dense: targets}  # set up target values for training
@@ -114,17 +120,25 @@ targets = {vision.nengo_dense: targets}  # set up target values for training
 with sim:
     sim.compile(optimizer=tf.optimizers.RMSprop(0.0001), loss=loss)
 
+    if save_all_weights:
+        current_params_loc = "%s/epoch_%i" % (save_folder, epoch)
+    else:
+        prev_params_loc = "%s/weights" % save_folder
+        current_params_loc = prev_params_loc
+
     for epoch in range(epochs[0], epochs[1]):
         print("\nEPOCH %i" % epoch)
         if epoch > 0:
-            prev_params_loc = "%s/epoch_%i" % (save_folder, epoch - 1)
+            if save_all_weights:
+                prev_params_loc = "%s/epoch_%i" % (save_folder, epoch - 1)
+                current_params_loc = "%s/epoch_%i" % (save_folder, epoch)
+
             print("Loading pretrained network parameters from \n%s" % prev_params_loc)
             sim.load_params(prev_params_loc)
 
         print("Fitting data...")
         sim.fit(images, targets, epochs=1)
 
-        current_params_loc = "%s/epoch_%i" % (save_folder, epoch)
         print("Saving network parameters to %s" % current_params_loc)
         sim.save_params(current_params_loc)
 
@@ -138,7 +152,7 @@ test_params = {
 }
 
 # Save our set up parameters
-dat_results = DataHandler("%s_results" % db_name)
+dat_results = DataHandler(db_dir=database_dir, db_name="%s_results" % db_name)
 dat_results.save(
     data=test_params, save_location="%s/params" % save_folder, overwrite=True
 )
