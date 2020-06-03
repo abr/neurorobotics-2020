@@ -111,7 +111,7 @@ if __name__ == "__main__":
     plot_power()
 
     plt.tight_layout()
-    loc = "Figures/power.pdf"
+    loc = "figures/power.pdf"
     print("Figure saved to %s" % loc)
     plt.savefig(loc)
     plt.show()

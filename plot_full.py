@@ -15,7 +15,7 @@ ax = plt.subplot(2, 2, 4)
 plot_latency(ax)
 
 plt.tight_layout()
-loc = "Figures/adaptive_arm_results.pdf"
+loc = "figures/adaptive_arm_results.pdf"
 print("Figure saved to %s" % loc)
 plt.savefig(loc)
 plt.show()

@@ -8,10 +8,12 @@ To run the demo with Nengo running on cpu:
 To run the demo with Nengo on loihi
     NXSDKHOST=loihighrd python nengo_rover.py
 """
-import matplotlib.pyplot as plt
-import numpy as np
+import sys
 import timeit
 import os
+
+import matplotlib.pyplot as plt
+import numpy as np
 import tensorflow as tf
 
 import nengo
@@ -19,7 +21,6 @@ import nengo_loihi
 from nengo_loihi.neurons import LoihiSpikingRectifiedLinear
 from nengo_interfaces.mujoco import Mujoco
 
-from data_handler import DataHandler
 from rover_vision import RoverVision
 
 
@@ -27,7 +28,7 @@ current_dir = os.path.abspath('.')
 if not os.path.exists('%s/figures' % current_dir):
     os.makedirs('%s/figures' % current_dir)
 if not os.path.exists('%s/data' % current_dir):
-    save_folder = '%s/data' % current_dir
+    os.makedirs('%s/data' % current_dir)
 
 class ExitSim(Exception):
     pass
@@ -36,11 +37,10 @@ class ExitSim(Exception):
 def demo(
     backend="cpu",
     collect_ground_truth=False,
-    generate_data=False,
     motor_neuron_type=LoihiSpikingRectifiedLinear(),
     neural_vision=True,
     plot_mounted_camera_freq=None,
-    weights_name='reference_weights'
+    weights_name=None,
 ):
     if backend == "loihi":
         nengo_loihi.set_defaults()
@@ -51,15 +51,11 @@ def demo(
     dist_limit = [0.25, 3.5]
     angle_limit = [-np.pi, np.pi]
 
+    accel_scale = 500
+    steer_scale = 500
+
     # data collection parameters in steps (1ms per step)
-    save_frequency = 10
-    # time steps
-    render_frequency = 10
-    total_images_saved = 50000
-    if generate_data:
-        max_time_to_target = 2000
-    else:
-        max_time_to_target = 10000
+    max_time_to_target = 10000
 
     net = nengo.Network(seed=seed)
     # create our Mujoco interface
@@ -75,6 +71,7 @@ def demo(
         },
         joint_names=["steering_wheel"],
         track_input=True,
+        input_scale=np.array([steer_scale, accel_scale]),
     )
 
     # NOTE: why the slow rendering when defined before interface?
@@ -82,22 +79,6 @@ def demo(
 
     # set up the target position
     net.target = np.array([-0.0, 0.0, 0.2])
-
-    if generate_data:
-        db_dir = None
-        dat = DataHandler(db_dir=db_dir, db_name='rover')
-        dat.save(
-            data={
-                "render_frequency": render_frequency,
-                "save_frequency": save_frequency,
-                "max_time_to_target": max_time_to_target,
-                "render_size": vision.resolution,
-                "dist_limit": dist_limit,
-                "angle_limit": angle_limit,
-            },
-            save_location="params",
-            overwrite=True,
-        )
 
     net.config[nengo.Connection].synapse = None
     with net:
@@ -119,7 +100,8 @@ def demo(
                 swap_activations={tf.nn.relu: LoihiSpikingRectifiedLinear()},
                 scale_firing_rates=400,
             )
-            visionsim.load_params("%s/%s" % (save_folder, weights_name))
+            if weights_name is not None:
+                visionsim.load_params("%s/%s" % (current_dir, weights_name))
             with visionsim:
                 visionsim.freeze_params(visionnet)
                 vision.input.size_in = vision.subpixels
@@ -146,42 +128,14 @@ def demo(
                 local_target = np.dot(R, error)
                 net.localtarget_track.append(local_target / np.pi)
 
-                if generate_data and int(t / interface.dt) % save_frequency == 0:
-                    if np.linalg.norm(local_target) < 3.5:
-                        # save 10% of our images for validation
-
-                        if net.image_count % 10 == 0:
-                            test_name = 'validation'
-                            net.val_img_count += 1
-                            img_num = net.val_img_count
-                        else:
-                            test_name = 'training'
-                            net.train_img_count += 1
-                            img_num = net.train_img_count
-
-                        dat.save(
-                            data={"rgb": interface.camera_feedback, "target": local_target},
-                            save_location="%s/%04d" % (test_name, img_num),
-                            overwrite=True,
-                        )
-                        net.image_count += 1
-                        if net.image_count % 1000 == 0:
-                            print('%i/%i images generated' % (net.image_count, total_images_saved))
-
-                # scale by np.pi for consistency with neural vision output
                 # used to roughly normalize the local target signal to -1:1 range
                 output_signal = np.array([local_target[0], local_target[1]])
                 return output_signal
 
             local_target = nengo.Node(output=local_target, size_out=2)
 
-        accel_scale = 500
-        steer_scale = 500
-
         def check_exit_and_track_data(t, x):
-            if interface.exit or (
-                generate_data and net.image_count == total_images_saved
-            ):
+            if interface.exit:
                 raise ExitSim
 
             rover_xyz = interface.get_position("EE")
@@ -225,7 +179,6 @@ def demo(
             accel,
             mujoco_node[1],
             function=accel_function,
-            transform=accel_scale,
             synapse=0 if motor_neuron_type == nengo.Direct() else 0.1,
         )
 
@@ -254,7 +207,6 @@ def demo(
             steer,
             mujoco_node[0],
             function=lambda x: steer_function(x),
-            transform=steer_scale,
             # if using Direct mode, a synapse will cause oscillating control
             synapse=0 if motor_neuron_type == nengo.Direct() else 0.025,
         )
@@ -301,7 +253,7 @@ def demo(
             def calculate_ideal_motor_signals(t, x):
                 net.ideal_motor_track.append(
                     [
-                        steer_function(x) * steer_scale,
+                        steer_function(x)* steer_scale,
                         accel_function(x[1:]) * accel_scale,
                     ]
                 )
@@ -338,38 +290,18 @@ def demo(
 
 if __name__ == "__main__":
 
-    # set up parameters that depend on cpu or loihi as the backend
-    backend = "cpu"  # can be ["cpu"|"loihi"]
-
-    collect_ground_truth = True  # track ideal network output, useful for plotting
-    #TODO: change this to update weights_name to weights or reference_weights depending on user set flag for using self trained weights
-    generate_data = False  # should training / validation data be created
-    import sys
-    if len(sys.argv) > 1:
-        if sys.argv[1] == 'generate_data':
-            generate_data = True
-
-    if generate_data:
-        # when generating training data for vision network, run using ideal system
-        print('\nGenerating Training Data\n')
-        motor_neuron_type = nengo.Direct()
-        neural_vision = False
-        # set to a large value, once we collect all of our images it will stop the sim
-        sim_runtime = 1e5
-    else:
-        # otherwise run use spiking neural networks
-        motor_neuron_type = LoihiSpikingRectifiedLinear()
-        neural_vision = True  # if True uses trained vision net, otherwise ground truth
-        sim_runtime = 10
+    backend = "loihi"  # can be ["cpu"|"loihi"]
+    weights = sys.argv[1] if len(sys.argv) > 1 else 'data/reference_weights'
+    sim_runtime = 10  # simulated seconds
+    collect_ground_truth = True  # for plotting comparison
 
     net = demo(
-        backend,
+        backend = backend,
         collect_ground_truth=collect_ground_truth,
-        generate_data=generate_data,
-        motor_neuron_type=motor_neuron_type,
-        neural_vision=neural_vision,
+        motor_neuron_type=LoihiSpikingRectifiedLinear(),
+        neural_vision=True,
         plot_mounted_camera_freq=None,  # how often to plot image from cameras
-        weights_name=weights_name
+        weights_name=weights
     )
 
     try:

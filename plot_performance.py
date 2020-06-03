@@ -116,7 +116,7 @@ if __name__ == "__main__":
     plot_performance()
 
     plt.tight_layout()
-    loc = "Figures/performance.pdf"
+    loc = "figures/performance.pdf"
     print("Figure saved to %s" % loc)
     plt.savefig(loc)
     plt.show()

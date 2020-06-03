@@ -73,13 +73,14 @@ try:
 
 except (FileNotFoundError, KeyError):
     print(reprocess_message)
-    images, targets = dl_utils.consolidate_data(
+    images, targets = dl_utils.load_data(
         db_name=db_name,
         db_dir=database_dir,
         # assuming data collected is all saved as training_0000. if you run multiple
         # sessions and save under more test names, e.g. training_0001, training_0002,
         # then update this parameter to include those test names.
-        label_list=['training'],
+        label='training',
+        n_imgs=40000,
         # how often to sample the images saved, works in conjunction with the
         # save_frequency parameter in rover.py used when saving data
         step_size=1,

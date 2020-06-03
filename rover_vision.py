@@ -147,7 +147,7 @@ if __name__ == "__main__":
     weights = "%s/weights" % save_folder
 
     images, targets = dl_utils.load_data(
-        db_dir=db_dir, db_name="rover", label="validation", step_size=20,
+        db_dir=db_dir, db_name="rover", label="validation",
     )
 
     # saved targets are 3D but we only care about x and y

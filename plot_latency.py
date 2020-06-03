@@ -55,7 +55,7 @@ if __name__ == "__main__":
     violin_parts = plot_latency()
 
     plt.tight_layout()
-    loc = "Figures/latency.pdf"
+    loc = "figures/latency.pdf"
     print("Figure saved to %s" % loc)
     plt.savefig(loc)
     plt.show()
