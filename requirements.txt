@@ -1,0 +1,42 @@
+attrdict==2.0.1
+certifi==2018.8.24
+cffi==1.14.0
+chardet==3.0.4
+cloudpickle==1.3.0
+coloredlogs==10.0
+cycler==0.10.0
+Cython==0.29.15
+decorator==4.4.1
+fasteners==0.15
+glfw==1.10.1
+grpcio>=1.24.3
+grpcio-tools==1.19.0
+MarkupSafe==1.1.1
+matplotlib>=3.0
+memory-profiler==0.55.0
+monotonic==1.5
+-e git+git@github.com:studywolf/mujoco-py.git@0924a0bd4274d615e07f21b9b3498805844b1121#egg=mujoco_py
+-e git+git@github.com:nengo/nengo.git@715a4f83c2d98df6f84033af57174efdceef26f6#egg=nengo
+-e git+git@github.com:nengo/nengo-loihi.git@316fa5c5a816a672399f984ca48adbdfadb93177#egg=nengo_loihi
+networkx==2.4
+numpy==1.18.1
+pandas==0.25.0
+Pillow==7.0.0
+psutil==5.7.0
+pycparser==2.19
+pydmps==0.2
+pyparsing==2.4.6
+python-dateutil==2.8.1
+pytz==2019.3
+requests==2.22.0
+scipy==1.4.1
+six==1.14.0
+sympy==1.5.1
+toolz==0.10.0
+urllib3==1.25.8
+tensorflow==2.2
+tensorflow-gpu==2.2
+protobuf>=3.8.0
+packaging==20.4
+nengo-dl==3.0.1
+opencv2-python
