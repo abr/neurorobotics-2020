@@ -61,7 +61,7 @@ def demo(
     # create our Mujoco interface
     interface = Mujoco(
         xml_file="rover.xml",
-        folder="",
+        joint_names=["steering_wheel"],
         dt=0.001,
         render_params={
             "cameras": [4, 1, 3, 2],  # camera ids and order to render
@@ -69,7 +69,6 @@ def demo(
             "frequency": 1,  # render images from cameras every time step
             "plot_frequency": None,  # do not plot images from cameras
         },
-        joint_names=["steering_wheel"],
         track_input=True,
         input_scale=np.array([steer_scale, accel_scale]),
     )
@@ -119,10 +118,10 @@ def demo(
             )
 
             def local_target(t):
-                rover_xyz = interface.get_position("EE")
+                rover_xyz = interface.get_position("base_link")
                 error = net.target - rover_xyz
                 # error in global coordinates, want it in local coordinates for rover
-                R_raw = interface.get_orientation("EE").T  # R.T = R^-1
+                R_raw = interface.get_orientation("base_link").T  # R.T = R^-1
                 # rotate it so y points forward toward the steering wheels
                 R = np.dot(R90, R_raw)
                 local_target = np.dot(R, error)
@@ -138,7 +137,7 @@ def demo(
             if interface.exit:
                 raise ExitSim
 
-            rover_xyz = interface.get_position("EE")
+            rover_xyz = interface.get_position("base_link")
             dist = np.linalg.norm(rover_xyz - net.target)
             if dist < 0.2 or int(t / interface.dt)%max_time_to_target == 0:
                 # generate a new target 1-2.5m away from current position
@@ -318,6 +317,7 @@ if __name__ == "__main__":
 
         with sim:
             start_time = timeit.default_timer()
+            print(sim.model.utilization_summary())
             sim.run(sim_runtime)
             print("\nRun time: %.5f\n" % (timeit.default_timer() - start_time))
 
