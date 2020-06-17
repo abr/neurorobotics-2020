@@ -1,12 +1,4 @@
 """
-To generate training data to train up the RoverVision system, set generate_data=True.
-
-
-To run the demo with Nengo running on cpu:
-    python nengo_rover.py cpu
-
-To run the demo with Nengo on loihi
-    NXSDKHOST=loihighrd python nengo_rover.py
 """
 import sys
 import timeit
@@ -24,11 +16,12 @@ from nengo_interfaces.mujoco import Mujoco
 from rover_vision import RoverVision
 
 
-current_dir = os.path.abspath('.')
-if not os.path.exists('%s/figures' % current_dir):
-    os.makedirs('%s/figures' % current_dir)
-if not os.path.exists('%s/data' % current_dir):
-    os.makedirs('%s/data' % current_dir)
+current_dir = os.path.abspath(".")
+if not os.path.exists("%s/figures" % current_dir):
+    os.makedirs("%s/figures" % current_dir)
+if not os.path.exists("%s/data" % current_dir):
+    os.makedirs("%s/data" % current_dir)
+
 
 class ExitSim(Exception):
     pass
@@ -139,7 +132,7 @@ def demo(
 
             rover_xyz = interface.get_position("base_link")
             dist = np.linalg.norm(rover_xyz - net.target)
-            if dist < 0.2 or int(t / interface.dt)%max_time_to_target == 0:
+            if dist < 0.2 or int(t / interface.dt) % max_time_to_target == 0:
                 # generate a new target 1-2.5m away from current position
                 while dist < 1 or dist > 2.5:
                     phi = np.random.uniform(low=angle_limit[0], high=angle_limit[1])
@@ -252,7 +245,7 @@ def demo(
             def calculate_ideal_motor_signals(t, x):
                 net.ideal_motor_track.append(
                     [
-                        steer_function(x)* steer_scale,
+                        steer_function(x) * steer_scale,
                         accel_function(x[1:]) * accel_scale,
                     ]
                 )
@@ -290,17 +283,20 @@ def demo(
 if __name__ == "__main__":
 
     backend = "loihi"  # can be ["cpu"|"loihi"]
-    weights = sys.argv[1] if len(sys.argv) > 1 else 'data/reference_weights'
     sim_runtime = 10  # simulated seconds
     collect_ground_truth = True  # for plotting comparison
 
+    weights = sys.argv[1] if len(sys.argv) > 1 else "data/reference_weights"
+    if weights[-4:] == ".npz":
+        weights = weights[:-4]
+
     net = demo(
-        backend = backend,
+        backend=backend,
         collect_ground_truth=collect_ground_truth,
         motor_neuron_type=LoihiSpikingRectifiedLinear(),
         neural_vision=True,
         plot_mounted_camera_freq=None,  # how often to plot image from cameras
-        weights_name=weights
+        weights_name=weights,
     )
 
     try:
@@ -310,6 +306,7 @@ if __name__ == "__main__":
                 target="sim",  # set equal to "loihi" to run on Loihi hardware
                 hardware_options=dict(snip_max_spikes_per_step=300),
             )
+            print(sim.model.utilization_summary())
         elif backend == "cpu":
             sim = nengo.Simulator(net, progress_bar=False)
         else:
@@ -317,7 +314,6 @@ if __name__ == "__main__":
 
         with sim:
             start_time = timeit.default_timer()
-            print(sim.model.utilization_summary())
             sim.run(sim_runtime)
             print("\nRun time: %.5f\n" % (timeit.default_timer() - start_time))
 

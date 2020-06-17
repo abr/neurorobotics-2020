@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 def plot_performance(ax=None):
     test_group = "weighted_tests"
-    main_db = "dewolf2018weight-tests"
+    main_db = "abr_neurorobotics2020_adaptation_data"
     test_list = [
         ["pd_no_weight", "", "k", main_db, test_group, "-"],
         ["pd", "", "tab:grey", main_db, test_group, "-"],
@@ -14,7 +14,7 @@ def plot_performance(ax=None):
         ["nengo_gpu1k", "Adaptive GPU", "r", main_db, test_group, "-"],
         ["nengo_loihi1k", "Adaptive Loihi", "b", main_db, test_group, "-"],
     ]
-    pd_dat = DataHandler(main_db)
+    pd_dat = DataHandler(db_name=main_db)
 
     # load in PD mean performance with and without weight for normalizing
     pd_no_weight_mean = pd_dat.load(

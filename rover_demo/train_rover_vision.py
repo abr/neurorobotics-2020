@@ -3,8 +3,18 @@ Train up the RoverVision network. Applies the scale_firing_rates = 400 heuristic
 initialize the network with higher firing rates.
 
 Expecting (images, targets) to be stored in the abr_analyze database in the
-abr_analyze.paths.database_dir folder. To generate training data, run rover.py with the
-generate_data variable set to True.
+abr_analyze.paths.database_dir folder. To generate training data, run
+generate_training_data.py.
+
+Once the network is trained, you can run
+
+    python rover_vision.py data/weights
+
+to test the vision network on a validation dataset, or
+
+    python rover.py data/weights
+
+to test the vision network in the full rover context.
 """
 import nengo_loihi
 
@@ -13,18 +23,22 @@ import os
 import sys
 import tensorflow as tf
 import numpy as np
-from data_handler import DataHandler
 
+import os
+import sys
+
+sys.path.append("../")
 import dl_utils
+from data_handler import DataHandler
 from rover_vision import RoverVision, LoihiRectifiedLinear
 
 reprocess_data = False
 if len(sys.argv) > 1:
-    if sys.argv[1] == 'reprocess_data':
+    if sys.argv[1] == "reprocess_data":
         reprocess_data = True
 
-current_dir = os.path.abspath('.')
-save_folder = '%s/data' % current_dir
+current_dir = os.path.abspath(".")
+save_folder = "%s/data" % current_dir
 if not os.path.exists(save_folder):
     os.makedirs(save_folder)
 
@@ -47,7 +61,7 @@ if gpus:
 save_all_weights = False
 activation = nengo_loihi.neurons.LoihiSpikingRectifiedLinear()
 dt = 0.001
-database_dir = None
+database_dir = "data"
 db_name = "rover"  # database we're reading images and targets from
 epochs = [0, 50]  # how many training iterations to run
 minibatch_size = 10
@@ -79,8 +93,7 @@ except (FileNotFoundError, KeyError):
         # assuming data collected is all saved as training_0000. if you run multiple
         # sessions and save under more test names, e.g. training_0001, training_0002,
         # then update this parameter to include those test names.
-        label='training',
-        n_imgs=40000,
+        label="training",
         # how often to sample the images saved, works in conjunction with the
         # save_frequency parameter in rover.py used when saving data
         step_size=1,
@@ -109,7 +122,7 @@ targets /= np.pi  # change target range to -1:1 instead of -pi:pi
 targets = dl_utils.repeat_data(targets, batch_data=True, n_steps=1)
 
 # convert from Keras to Nengo
-kwargs={
+kwargs = {
     "swap_activations": {tf.nn.relu: activation},
     "scale_firing_rates": scale_firing_rates,
 }
@@ -128,6 +141,13 @@ with sim:
         current_params_loc = prev_params_loc
 
     for epoch in range(epochs[0], epochs[1]):
+        if epoch < 2:
+            lr = 0.001
+        else:
+            lr = 0.0001 * tf.math.exp(0.1 * (2 - epoch))
+
+        lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lambda x: lr)
+
         print("\nEPOCH %i" % epoch)
         if epoch > 0:
             if save_all_weights:
@@ -138,22 +158,7 @@ with sim:
             sim.load_params(prev_params_loc)
 
         print("Fitting data...")
-        sim.fit(images, targets, epochs=1)
+        sim.fit(images, targets, epochs=1, callbacks=[lr_scheduler])
 
         print("Saving network parameters to %s" % current_params_loc)
         sim.save_params(current_params_loc)
-
-test_params = {
-    "dt": dt,
-    "scale_firing_rates": scale_firing_rates,
-    "n_training": images.shape[0],
-    "minibatch_size": minibatch_size,
-    "seed": seed,
-    "epochs": epochs,
-}
-
-# Save our set up parameters
-dat_results = DataHandler(db_dir=database_dir, db_name="%s_results" % db_name)
-dat_results.save(
-    data=test_params, save_location="%s/params" % save_folder, overwrite=True
-)

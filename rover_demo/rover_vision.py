@@ -1,9 +1,24 @@
 """
-To run the demo with Nengo running on cpu:
-    python nengo_rover.py
+The vision system for the rover. Takes in a 360 view of the Mujoco environment and
+locates a red target. The network then outputs the target's (x, y) location relative
+to the cameras.
 
-To run the demo with Nengo on loihi
-    NXSDKHOST=loihighrd python rover_vision.py
+To test the network on validation data, run
+
+    python generate_training_data.py
+
+to generate the validation test set, and then run
+
+    python rover_vision.py
+
+To run the network with your own trained weights, instead of the default reference
+weights, after you generate the training data, run
+
+    python train_rover_vision.py
+
+and then
+
+    python rover_vision.py data/weights
 """
 import tensorflow as tf
 import numpy as np
@@ -18,6 +33,10 @@ from nengo_loihi.neurons import (
     loihi_spikingrectifiedlinear_rates,
 )
 
+import os
+import sys
+
+sys.path.append("../")
 import dl_utils
 
 
@@ -95,7 +114,7 @@ class RoverVision:
 
         self.model = tf.keras.Model(inputs=self.input, outputs=self.dense)
 
-    def convert(self, add_probes=True, **kwargs):
+    def convert(self, add_probes=True, synapse=None, **kwargs):
         """ Run the NengoDL Converter on the above Keras net
 
         add_probes : bool, optional (Default: True)
@@ -124,7 +143,7 @@ class RoverVision:
                 self.probe_conv0 = nengo.Probe(self.conv0, label="probe_conv0")
                 self.probe_conv1 = nengo.Probe(self.conv1, label="probe_conv1")
                 self.probe_dense = nengo.Probe(
-                    self.output, label="probe_dense", synapse=0.005
+                    self.output, label="probe_dense", synapse=synapse
                 )
 
         sim = nengo_dl.Simulator(
@@ -134,17 +153,22 @@ class RoverVision:
 
 
 if __name__ == "__main__":
-    current_dir = os.path.abspath('.')
-    save_folder = '%s/data' % current_dir
-    db_dir = None
+    current_dir = os.path.abspath(".")
+    db_dir = "data"
     mode = "predict"  # should be ["predict"|"run"]
     if mode == "run":
         activation = LoihiSpikingRectifiedLinear()  # can be any Nengo neuron type
+        n_steps = 100  # how many time steps to present the input for
+        synapse = 0.005
     elif mode == "predict":
         activation = LoihiRectifiedLinear()
+        n_steps = 2
+        synapse = None
 
     scale_firing_rates = 400
-    weights = "%s/weights" % save_folder
+    weights = sys.argv[1] if len(sys.argv) > 1 else "data/reference_weights"
+    if weights[-4:] == ".npz":
+        weights = weights[:-4]
 
     images, targets = dl_utils.load_data(
         db_dir=db_dir, db_name="rover", label="validation",
@@ -162,16 +186,21 @@ if __name__ == "__main__":
         normalize=False,
         res=[32, 128],
     )
+    # choose random subset of 100 images for testing
+    indices = np.random.permutation(np.arange(len(images)))[:100]
+    images = images[indices]
+    targets = targets[indices]
 
     # repeat and batch our data
-    images = dl_utils.repeat_data(images, batch_data=False, n_steps=1)
-    targets = dl_utils.repeat_data(targets, batch_data=False, n_steps=1)
+    images = dl_utils.repeat_data(images, batch_data=False, n_steps=n_steps)
+    targets = dl_utils.repeat_data(targets, batch_data=False, n_steps=n_steps)
 
     # instantiate our keras converted network
     dt = 0.001
     vision = RoverVision(minibatch_size=1, dt=dt, seed=np.random.randint(1e5))
     # convert from Keras to Nengo
     sim, net = vision.convert(
+        synapse=synapse,
         swap_activations={tf.nn.relu: activation},
         scale_firing_rates=scale_firing_rates,
     )
@@ -192,7 +221,8 @@ if __name__ == "__main__":
         images = images.squeeze()
 
         def send_image_in(t):
-            return vision.image_input[int(t / 0.001) - 1]
+            # dimensions should be (n_timesteps, image.flatten())
+            return images[int(t / 0.001) - 1]
 
         with sim:
             sim.freeze_params(net)
@@ -201,9 +231,6 @@ if __name__ == "__main__":
         with net:
             nengo_loihi.add_params(net)
             net.config[vision.conv0.ensemble].on_chip = False
-
-        # dimensions should be (n_timesteps, image.flatten())
-        vision.image_input = images[0]
 
         sim = nengo_loihi.Simulator(net, dt=dt)
         with sim:

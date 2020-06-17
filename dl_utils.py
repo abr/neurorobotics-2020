@@ -124,7 +124,9 @@ def repeat_data(data, batch_data=False, n_steps=1):
     return data
 
 
-def load_data(db_name, label="training_0000", n_imgs=None, thresh=1e5, step_size=1, db_dir=None):
+def load_data(
+    db_name, label="training_0000", n_imgs=None, thresh=1e5, step_size=1, db_dir=None
+):
     """
     loads rgb images and targets from an hdf5 database and returns them as a np array
 
@@ -154,8 +156,10 @@ def load_data(db_name, label="training_0000", n_imgs=None, thresh=1e5, step_size
     images = []
     targets = []
 
-    skip_list = ['datestamp', 'timestamp']
-    keys = np.array([int(val) for val in dat.get_keys("%s" % label) if val not in skip_list])
+    skip_list = ["datestamp", "timestamp"]
+    keys = np.array(
+        [int(val) for val in dat.get_keys("%s" % label) if val not in skip_list]
+    )
     n_imgs = max(keys) if n_imgs is None else n_imgs
     print("Total number of images in dataset: ", max(keys))
 

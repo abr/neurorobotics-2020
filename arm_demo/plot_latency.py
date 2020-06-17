@@ -2,17 +2,21 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
-from abr_analyze import DataHandler
-from abr_analyze.paths import figures_dir
+
+import os
+import sys
+
+sys.path.append("../")
+from data_handler import DataHandler
 
 
 def plot_latency(ax=None):
     test_group = "weighted_tests"
-    main_db = "dewolf2018weight-tests"
+    main_db = "abr_neurorobotics2020_adaptation_data"
     test_list = ["pd", "pid", "nengo_loihi1k", "nengo_cpu1k", "nengo_gpu1k"]
     colors = ["k", "tab:brown", "b", "g", "r"]
 
-    dat = DataHandler(main_db)
+    dat = DataHandler(db_name=main_db)
     times = []
     for ii, test in enumerate(test_list):
         data = dat.load(
