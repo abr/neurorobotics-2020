@@ -34,7 +34,7 @@ six==1.14.0
 sympy==1.5.1
 toolz==0.10.0
 urllib3==1.25.8
-tensorflow==2.2
+tensorflow==2.2.1
 tensorflow-gpu==2.2
 protobuf>=3.8.0
 packaging==20.4
