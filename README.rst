@@ -37,7 +37,7 @@ and NengoLoihi::
     pip install -e .
     cd ..
 
-    git clone https://github.com/nengo/nengo-interfacesa
+    git clone https://github.com/nengo/nengo-interfaces
     cd nengo_interfaces
     pip install -e .
     cd ..
@@ -77,7 +77,7 @@ This will generate the weights file in the data folder. By default this will run
 Test the network to validate
 ::
 
-    python rover_vision data/weights
+    python rover_vision.py data/weights
 
 Run using the rover
 ::
