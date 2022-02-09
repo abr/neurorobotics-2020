@@ -35,7 +35,7 @@ sympy==1.5.1
 toolz==0.10.0
 urllib3==1.25.8
 tensorflow==2.2.1
-tensorflow-gpu==2.2.1
+tensorflow-gpu==2.5.3
 protobuf>=3.8.0
 packaging==20.4
 nengo-dl==0.3.1
