@@ -1,6 +1,8 @@
-from abr_analyze import DataHandler
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
+sys.path.append('../')
+from data_handler import DataHandler
 
 
 def plot_performance(ax=None):
