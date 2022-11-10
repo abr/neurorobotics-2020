@@ -42,6 +42,33 @@ and NengoLoihi::
     pip install -e .
     cd ..
 
+Installation for Windows users
+##############################
+
+- Download the binaries for mujoco 2.1.0: https://github.com/deepmind/mujoco/releases/download/2.1.0/mujoco210-windows-x86_64.zip
+- Extract the downloaded mujoco210 directory into ``C:\Users\your_user\.mujoco\mujoco210``
+- Add the bin folder to your user PATH:
+        Search box > Edit the System Environment Variables >Environment Variables
+        Edit 'Path' variable on User variables
+        New -> ``C:\Users\your_user\.mujoco\mujoco210\bin``
+- Install ``mujoco-py`` library, a compatible version (this is NOT the custom library)::
+
+        pip install mujoco-py==2.1.2.14
+        
+- Clone the repository, the last updated branch::
+
+        git clone -b mausspaun https://github.com/studywolf/mujoco-py.git
+        
+- Find the folder ``mujoco_py`` and copy it to your python distribution packages folder, overwriting all the standard files with the custom files from the repository
+        For Windows 10 users with Anaconda the standard folder is usually ``C:\Anaconda3\Lib\site-packages\mujoco_py\``
+- Test your installation by running python on a terminal and importing the custom mujoco_py library::
+
+    import mujoco_py
+    
+- Since the original files were manually overwritten, the library will compile again (only the first time you import it), and if no errors were reported, the installation is complete.
+
+Examples
+========
 
 Example 1 - Neurorobotic rover perception and action
 ####################################################
@@ -99,4 +126,3 @@ Once the dataset is downloaded to this folder, you can simply run::
     python plot_full.py
 
 To run the analysis and generate the graphs in Figure 2 of the paper.
-
