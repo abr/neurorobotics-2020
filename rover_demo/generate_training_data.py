@@ -16,6 +16,7 @@ import sys
 
 sys.path.append("../")
 from data_handler import DataHandler
+from rover import quaternion_to_rotation_matrix
 
 current_dir = os.path.abspath(".")
 if not os.path.exists("%s/figures" % current_dir):
@@ -81,10 +82,12 @@ def generate_data(
         )
 
         def local_target(t):
-            rover_xyz = interface.get_position("base_link")
+            rover_xyz = interface.get_xyz("base_link")
             error = net.target - rover_xyz
             # error in global coordinates, want it in local coordinates for rover
-            R_raw = interface.get_orientation("base_link").T  # R.T = R^-1
+            # R_raw = interface.get_orientation("base_link").T  # R.T = R^-1
+            quaternion = interface.get_orientation("base_link")#.T  # R.T = R^-1
+            R_raw = quaternion_to_rotation_matrix(quaternion).T
             # rotate it so y points forward toward the steering wheels
             R = np.dot(R90, R_raw)
             local_target = np.dot(R, error)
@@ -127,7 +130,7 @@ def generate_data(
             if net.image_count == total_images_saved:
                 raise ExitSim
 
-            rover_xyz = interface.get_position("base_link")
+            rover_xyz = interface.get_xyz("base_link")
             dist = np.linalg.norm(rover_xyz - net.target)
             if dist < 0.2 or int(t / interface.dt) % max_time_to_target == 0:
                 # generate a new target 1-2.5m away from current position

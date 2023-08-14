@@ -11,6 +11,8 @@ import tensorflow as tf
 import nengo
 import nengo_loihi
 from nengo_loihi.neurons import LoihiSpikingRectifiedLinear
+from abr_control.arms.mujoco_config import MujocoConfig
+from abr_control.utils import transformations
 from nengo_interfaces.mujoco import Mujoco
 
 from rover_vision import RoverVision
@@ -51,20 +53,21 @@ def demo(
     max_time_to_target = 10000
 
     net = nengo.Network(seed=seed)
+    rover = MujocoConfig("rover.xml", folder='')
+
     # create our Mujoco interface
     interface = Mujoco(
-        xml_file="rover.xml",
-        joint_names=["steering_wheel"],
+        robot_config=rover,
         dt=0.001,
         render_params={
             "cameras": [4, 1, 3, 2],  # camera ids and order to render
             "resolution": [32, 32],
             "frequency": 1,  # render images from cameras every time step
-            "plot_frequency": None,  # do not plot images from cameras
         },
         track_input=True,
         input_scale=np.array([steer_scale, accel_scale]),
     )
+    interface.connect(joint_names=["steering_wheel", "rear_differential"])
 
     # NOTE: why the slow rendering when defined before interface?
     vision = RoverVision(seed=0)
@@ -111,10 +114,12 @@ def demo(
             )
 
             def local_target(t):
-                rover_xyz = interface.get_position("base_link")
+                rover_xyz = interface.get_xyz("base_link")
                 error = net.target - rover_xyz
                 # error in global coordinates, want it in local coordinates for rover
-                R_raw = interface.get_orientation("base_link").T  # R.T = R^-1
+                quaternion = interface.get_orientation("base_link")#.T  # R.T = R^-1
+                R_raw = quaternion_to_rotation_matrix(quaternion).T
+
                 # rotate it so y points forward toward the steering wheels
                 R = np.dot(R90, R_raw)
                 local_target = np.dot(R, error)
@@ -130,7 +135,7 @@ def demo(
             if interface.exit:
                 raise ExitSim
 
-            rover_xyz = interface.get_position("base_link")
+            rover_xyz = interface.get_xyz("base_link")
             dist = np.linalg.norm(rover_xyz - net.target)
             if dist < 0.2 or int(t / interface.dt) % max_time_to_target == 0:
                 # generate a new target 1-2.5m away from current position
@@ -214,7 +219,8 @@ def demo(
         vision_synapse = 0.05
         if neural_vision:
             # send image input in to vision system
-            nengo.Connection(mujoco_node[2:], vision.input)
+            # nengo.Connection(mujoco_node[2:], vision.input)
+            nengo.Connection(mujoco_node[4:], vision.input)
             # connect vision network prediction to steering ensemble
             nengo.Connection(vision.output, steer_input[1:], synapse=vision_synapse)
             # connect vision network prediction to accel ensemble
@@ -280,9 +286,19 @@ def demo(
     return net
 
 
+def quaternion_to_rotation_matrix(quaternion):
+    w, x, y, z = quaternion
+    rotation_matrix = np.array([
+        [1 - 2*y**2 - 2*z**2, 2*x*y - 2*w*z, 2*x*z + 2*w*y],
+        [2*x*y + 2*w*z, 1 - 2*x**2 - 2*z**2, 2*y*z - 2*w*x],
+        [2*x*z - 2*w*y, 2*y*z + 2*w*x, 1 - 2*x**2 - 2*y**2]
+    ])
+    return rotation_matrix
+
 if __name__ == "__main__":
 
     backend = "loihi"  # can be ["cpu"|"loihi"]
+    # backend = "cpu"
     sim_runtime = 10  # simulated seconds
     collect_ground_truth = True  # for plotting comparison
 
