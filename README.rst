@@ -2,6 +2,8 @@
 Nengo and low-powered AI hardware for robust, embedded control
 ***********
 
+***This branch is a WIP updating to mujoco-viewer.
+
 This repository is supplementary material for the paper 'Nengo and low-powered AI hardware for robust, embedded control'.
 The code for running the examples is provided here, as well as the scripts for regenerating the data analysis in Figure 2.
 
@@ -12,60 +14,28 @@ These instructions assume you are using `Anaconda <https://www.anaconda.com/prod
 
 **NOTE** To run these examples on Loihi hardware you will need to adhere to the Loihi dependencies, including Python 3.5.2.
 Installation instructions can be found at: https://www.nengo.ai/nengo-loihi/installation.html.
+
 These examples can also be run using any other Nengo backend, including NengoLoihi's emulator.
-If you are targetting any backend aside from the Loihi hardware, please install the most recent Python.
+If you are targetting any backend aside from the Loihi hardware, please install the most recent Python>=3.8.
 
 To install the dependencies, run::
 
+    conda create -n neurorobotics python=3.8
+    conda activate neurorobotics
     pip install -r requirements.txt
-
-You will also need to install the latest versions of Nengo, NengoDL, NengoInterfaces,
-and NengoLoihi::
-
-    git clone https://github.com/nengo/nengo
-    cd nengo
+    git clone https://github.com/nengo/nengo-interfaces
+    cd nengo_interfaces
+    git checkout mujoco_viewer
     pip install -e .
     cd ..
 
-    git clone https://github.com/nengo/nengo-dl
-    cd nengo-dl
-    pip install -e .
-    cd ..
+
+To use the loihi simulator, you will also need to install::
 
     git clone https://github.com/nengo/nengo-loihi
     cd nengo-loihi
     pip install -e .
     cd ..
-
-    git clone https://github.com/nengo/nengo-interfaces
-    cd nengo_interfaces
-    pip install -e .
-    cd ..
-
-Installation for Windows users
-##############################
-
-- Download the binaries for mujoco 2.1.0: https://github.com/deepmind/mujoco/releases/download/2.1.0/mujoco210-windows-x86_64.zip
-- Extract the downloaded mujoco210 directory into ``C:\Users\your_user\.mujoco\mujoco210``
-- Add the bin folder to your user PATH:
-        Search box > Edit the System Environment Variables >Environment Variables
-        Edit 'Path' variable on User variables
-        New -> ``C:\Users\your_user\.mujoco\mujoco210\bin``
-- Install ``mujoco-py`` library, a compatible version (this is NOT the custom library)::
-
-        pip install mujoco-py==2.1.2.14
-        
-- Clone the repository, the last updated branch::
-
-        git clone -b mausspaun https://github.com/studywolf/mujoco-py.git
-        
-- Find the folder ``mujoco_py`` and copy it to your python distribution packages folder, overwriting all the standard files with the custom files from the repository
-        For Windows 10 users with Anaconda the standard folder is usually ``C:\Anaconda3\Lib\site-packages\mujoco_py\``
-- Test your installation by running python on a terminal and importing the custom mujoco_py library::
-
-    import mujoco_py
-    
-- Since the original files were manually overwritten, the library will compile again (only the first time you import it), and if no errors were reported, the installation is complete.
 
 Examples
 ========
