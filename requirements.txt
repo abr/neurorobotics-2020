@@ -19,7 +19,7 @@ monotonic==1.5
 -e git+git@github.com:nengo/nengo.git@715a4f83c2d98df6f84033af57174efdceef26f6#egg=nengo
 -e git+git@github.com:nengo/nengo-loihi.git@316fa5c5a816a672399f984ca48adbdfadb93177#egg=nengo_loihi
 networkx==2.4
-numpy==1.18.1
+numpy==1.22.0
 pandas==0.25.0
 Pillow>=7.1.0
 psutil==5.7.0
